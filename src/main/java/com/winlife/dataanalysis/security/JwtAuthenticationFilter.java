@@ -1,5 +1,6 @@
 package com.winlife.dataanalysis.security;
 
+import com.winlife.dataanalysis.util.JwtUtil;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

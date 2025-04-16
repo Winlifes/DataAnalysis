@@ -48,6 +48,13 @@
 import { User, Lock } from "@element-plus/icons-vue";
 import {ElMessage} from "element-plus";
 import api from "@/api/index.js";
+import {onMounted} from "vue";
+
+onMounted(() => {
+  localStorage.removeItem("token");
+  localStorage.removeItem("nickname");
+  localStorage.removeItem("isSuperAdmin");
+});
 
 export default {
   components: {

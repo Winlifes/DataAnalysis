@@ -24,11 +24,12 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    if (error.response && error.response.status === 403) {
       ElMessage.error('登陆过期，请重新登录')
-      localStorage.removeItem('token')
-      localStorage.removeItem('nickname')
-      window.location.href = '/login'
+      //localStorage.removeItem('token')
+      //localStorage.removeItem('nickname')
+      //localStorage.removeItem("isSuperAdmin");
+      //window.location.href = '/login'
     } else {
       //ElMessage.error('请求失败')
     }
