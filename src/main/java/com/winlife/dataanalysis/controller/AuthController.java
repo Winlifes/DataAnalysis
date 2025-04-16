@@ -3,7 +3,7 @@ package com.winlife.dataanalysis.controller;
 import com.winlife.dataanalysis.dto.LoginRequest;
 import com.winlife.dataanalysis.dto.LoginResponse;
 import com.winlife.dataanalysis.model.User;
-import com.winlife.dataanalysis.security.JwtUtil;
+import com.winlife.dataanalysis.util.JwtUtil;
 import com.winlife.dataanalysis.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,8 +17,6 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 
 @RestController

@@ -17,7 +17,7 @@
           权限详情
         </el-menu-item>
         <!-- ✅ 仅管理员可见 -->
-        <el-menu-item v-if="isAdmin" index="userManage">
+        <el-menu-item v-if="isAdmin === 'true'" index="userManage">
           <el-icon><UserFilled /></el-icon>
           用户管理
         </el-menu-item>

@@ -1,7 +1,8 @@
-package com.winlife.dataanalysis.security;
+package com.winlife.dataanalysis.util;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
@@ -53,5 +54,9 @@ public class JwtUtil {
 
     private boolean isTokenExpired(String token) {
         return extractClaim(token, Claims::getExpiration).before(new Date());
+    }
+
+    public static String getUsername(){
+        return SecurityContextHolder.getContext().getAuthentication().getName();
     }
 }
