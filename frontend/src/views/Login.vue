@@ -109,7 +109,7 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
+  height: calc(100vh - 16px);
   background: #f2f3f5;
   overflow: hidden;
 }
