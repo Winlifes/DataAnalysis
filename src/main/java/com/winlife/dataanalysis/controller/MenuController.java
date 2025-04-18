@@ -59,4 +59,9 @@ public class MenuController {
     public void deleteDashboard(@PathVariable Long id) {
         menuService.deleteDashboard(id);
     }
+
+    @PutMapping("/dashboard/move")
+    public void moveDashboard(@RequestBody Map<String, String> req) {
+        menuService.moveDashboard(Long.parseLong(req.get("id")), Long.parseLong(req.get("targetFolderId")));
+    }
 }

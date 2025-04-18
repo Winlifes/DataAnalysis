@@ -23,6 +23,12 @@ public class MenuService {
 
     public List<Map<String, Object>> getMenuTree(Long userId) {
         List<Folder> folders = folderRepo.findByUserId(userId);
+        List<Folder> projectFolders = folderRepo.findByIcon("section-project");
+        for (Folder projectFolder : projectFolders) {
+            if (!folders.contains(projectFolder)) {
+                folders.add(projectFolder);
+            }
+        }
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (Folder folder : folders) {
@@ -73,5 +79,11 @@ public class MenuService {
 
     public void deleteDashboard(Long id) {
         dashboardRepo.deleteById(id);
+    }
+
+    public void moveDashboard(Long id, Long targetFolderId) {
+        Dashboard dashboard = dashboardRepo.findById(id).orElseThrow();
+        dashboard.setFolderId(targetFolderId);
+        dashboardRepo.save(dashboard);
     }
 }

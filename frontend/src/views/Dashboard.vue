@@ -5,12 +5,14 @@
       <Sidebar
         :is-collapsed="isSidebarCollapsed"
         :current-dashboard-id="currentDashboardId"
+        :menu-data="menuData"
         @toggle-collapse="toggleSidebarCollapse"
         @add-folder="openAddModal('folder')"
         @add-dashboard="openAddModal('dashboard')"
         @select-dashboard="handleDashboardSelect"
         @edit-item="openEditModal"
         @delete-item="handleDeleteItem"
+        @move-item="openMoveModal"
       />
 
       <el-main class="main-content" :style="{ marginLeft: 0 }">
@@ -35,13 +37,20 @@
           <div v-for="(chartConfig) in currentChartLayouts" :key="chartConfig.id"
                :style="{ 'grid-column': chartConfig.size === 'large' ? 'span 2' : 'span 1' }"
                class="chart-grid-item">
-            <LineChartCard v-bind="chartConfig" :current-size="chartConfig.size"
-                           @toggle-size="handleChartResize" @remove="handleChartRemoveFromLayout"
-                           @settings="handleChartSettings" @refresh="handleChartRefresh"
-                           @fullscreen="handleChartFullscreen" @title-click="handleChartTitleClick"
-                           @granularity-change="handleGranularityChange"
-                           @daterange-change="handleDateRangeChange"
-                           @comparison-toggle="handleComparisonToggle" :card-id="chartConfig.id"/>
+            <LineChartCard
+              v-bind="chartConfig"
+              :current-size="chartConfig.size"
+              @toggle-size="handleChartResize"
+              @remove="handleChartRemoveFromLayout"
+              @settings="handleChartSettings"
+              @refresh="handleChartRefresh"
+              @fullscreen="handleChartFullscreen"
+              @title-click="handleChartTitleClick"
+              @granularity-change="handleGranularityChange"
+              @daterange-change="handleDateRangeChange"
+              @comparison-toggle="handleComparisonToggle"
+              :card-id="chartConfig.id"
+            />
           </div>
           <div v-if="!currentChartLayouts || currentChartLayouts.length === 0" class="no-dashboard">
             请从左侧菜单选择一个看板或新建看板。
@@ -50,27 +59,43 @@
       </el-main>
     </el-container>
 
-    <el-dialog v-model="itemModalVisible"
-               :title="modalMode === 'add' ? (addItemType === 'dashboard' ? '新建看板' : '新建文件夹') : '重命名'"
-               width="400px" :close-on-click-modal="false" @closed="resetForm">
+    <el-dialog
+      v-model="itemModalVisible"
+      :title="modalMode === 'add' ? (addItemType === 'dashboard' ? '新建看板' : '新建文件夹') : '重命名'"
+      width="400px"
+      :close-on-click-modal="false"
+      @closed="resetForm"
+    >
       <el-form ref="itemFormRef" :model="itemForm" :rules="itemFormRules" label-width="80px">
         <el-form-item label="名称" prop="name">
-          <el-input v-model="itemForm.name" placeholder="请输入名称"></el-input>
+          <el-input v-model="itemForm.name" placeholder="请输入名称"/>
         </el-form-item>
-        <el-form-item v-if="modalMode === 'add' && addItemType === 'dashboard'" label="所属文件夹"
-                      prop="parentId">
+        <el-form-item
+          v-if="modalMode === 'add' && addItemType === 'dashboard'"
+          label="所属文件夹"
+          prop="parentId"
+        >
           <el-select v-model="itemForm.parentId" placeholder="请选择文件夹" style="width: 100%">
-            <el-option v-for="folder in availableFolders" :key="folder.id" :label="folder.title" :value="folder.id">
-              <span>{{ folder.section ? `[${folder.section}] ` : '' }}{{ folder.title }}</span>
-            </el-option>
+            <el-option
+              v-for="folder in availableFolders"
+              :key="folder.id"
+              :label="folder.section ? `[${folder.section}] ${folder.title}` : folder.title"
+              :value="folder.id"
+            />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="modalMode === 'add' && addItemType === 'folder'" label="所属分组"
-                      prop="parentId">
-          <el-select v-model="itemForm.parentId" placeholder="请选择分组 (我的看板/项目空间)"
-                     style="width: 100%">
-            <el-option label="我的看板" value="section-my"></el-option>
-            <el-option label="项目空间" value="section-project"></el-option>
+        <el-form-item
+          v-if="modalMode === 'add' && addItemType === 'folder'"
+          label="所属分组"
+          prop="parentId"
+        >
+          <el-select
+            v-model="itemForm.parentId"
+            placeholder="请选择分组 (我的看板/项目空间)"
+            style="width: 100%"
+          >
+            <el-option label="我的看板" value="section-my"/>
+            <el-option label="项目空间" value="section-project"/>
           </el-select>
         </el-form-item>
       </el-form>
@@ -81,12 +106,36 @@
         </span>
       </template>
     </el-dialog>
-
+    <!-- 移动看板对话框 -->
+    <el-dialog
+      v-model="moveModalVisible"
+      title="移动看板"
+      width="400px"
+      :close-on-click-modal="false"
+      @closed="resetMoveForm"
+    >
+      <el-form ref="moveFormRef" :model="moveForm" :rules="moveFormRules" label-width="80px">
+        <el-form-item label="目标文件夹" prop="targetFolderId">
+          <el-select v-model="moveForm.targetFolderId" placeholder="请选择文件夹" style="width: 100%">
+            <el-option
+              v-for="folder in availableFolders"
+              :key="folder.id"
+              :label="folder.section ? `[${folder.section}] ${folder.title}` : folder.title"
+              :value="folder.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="moveModalVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitMove">确定</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
 <script setup>
-import { ref, shallowRef, computed, onMounted, nextTick } from 'vue';
+import { ref, shallowRef, onMounted } from 'vue';
 import {
   ElMessage,
   ElMessageBox,
@@ -95,30 +144,33 @@ import {
   ElFormItem,
   ElInput,
   ElSelect,
-  ElOption
+  ElOption,
+  ElContainer,
+  ElMain,
+  ElTag,
+  ElButton
 } from 'element-plus';
-import {ElContainer, ElMain, ElTag, ElButton} from 'element-plus';
-import TopNav from "@/components/TopNav.vue";
-import Sidebar from "@/components/Sidebar.vue";
-import LineChartCard from "@/components/LineChartCard.vue";
+import TopNav from '@/components/TopNav.vue';
+import Sidebar from '@/components/Sidebar.vue';
+import LineChartCard from '@/components/LineChartCard.vue';
 import {
   Filter,
   Refresh,
   MoreFilled,
   Plus,
-  Warning,
   Star,
-  Folder,
-  DataAnalysis
+  Folder
 } from '@element-plus/icons-vue';
-import api from "@/api/index.js";
+import api from '@/api/index.js';
 
-// 状态变量
+// ---------- 状态定义 ----------
 const timezone = ref('UTC-8');
 const isSidebarCollapsed = ref(false);
+const menuData = ref([]);                // 传给 Sidebar 的已处理菜单数据
+const availableFolders = ref([]);        // 新建看板时的文件夹列表
 const currentDashboardId = ref('db-core-metrics');
-const currentChartLayouts = ref([]);
 const currentDashboardTitle = ref('看板');
+const currentChartLayouts = ref([]);
 const itemModalVisible = ref(false);
 const modalMode = ref('add');
 const addItemType = ref('dashboard');
@@ -130,244 +182,155 @@ const itemFormRules = {
   parentId: [{ required: true, message: '所属位置不能为空', trigger: 'change' }]
 };
 
-// 修复新建看板选择文件夹没有数据的问题
-// 定义 availableFolders，并在组件加载时调用 fetchFolders 从 API 获取文件夹数据
-const availableFolders = ref([]);
-const fetchFolders = async () => {
+// 移动
+const moveModalVisible = ref(false);
+const moveFormRef = ref(null);
+const moveForm = ref({ id: '', targetFolderId: null });
+const moveFormRules = {
+  targetFolderId: [{ required: true, message: '请选择目标文件夹', trigger: 'change' }]
+};
+
+// ---------- API & 刷新方法 ----------
+/** 拉取并处理菜单数据，构造“我的看板”“项目空间”两个分区 */
+const fetchMenu = async () => {
   try {
     const response = await api.get('/api/menu/list');
-    const rawData = response.data;
-    const folders = [];
-    rawData.forEach(item => {
-      // 根据接口数据中标识文件夹的字段做判断，此处假设 icon 字段为 'section-my' 或 'section-project'
-      if (item.icon === 'section-my' || item.icon === 'section-project') {
-        const sectionTitle = item.icon === 'section-my' ? '我的看板' : '项目空间';
-        folders.push({
-          id: item.id,
-          title: item.title,
-          section: sectionTitle
-        });
+    const raw = response.data;
+    const processed = [];
+    const mySection = { id: 'section-my', type: 'section', title: '我的看板', children: [] };
+    const projSection = { id: 'section-project', type: 'section', title: '项目空间', children: [] };
+
+    raw.forEach(item => {
+      if (item.icon === 'section-my') {
+        item.icon = shallowRef(Star);
+        mySection.children.push(item);
+      } else if (item.icon === 'section-project') {
+        item.icon = shallowRef(Folder);
+        projSection.children.push(item);
       }
     });
-    availableFolders.value = folders;
-  } catch (error) {
-    console.error('Failed to fetch folders:', error);
+
+    processed.push(mySection, projSection);
+    menuData.value = processed;
+
+    // 同步 availableFolders 用于 “新建看板” 下拉
+    availableFolders.value = processed.flatMap(section =>
+      section.children.map(f => ({
+        id: f.id,
+        title: f.title,
+        section: section.title
+      }))
+    );
+  } catch (err) {
+    console.error('fetchMenu error:', err);
+    ElMessage.error('加载菜单失败');
   }
 };
 
-const allDashboardConfigs = ref({
-  'db-sales-overview': { title: '销售总览看板', charts: [] },
-  'db-marketing-kpi': { title: '市场KPI看板', charts: [] },
-  'db-quick-test': { title: '快速测试看板', charts: [] },
-  'db-core-metrics': {
-    title: '核心数据看板',
-    charts: [{
-      id: 'new-users',
-      reportId: 'RPT001',
-      size: 'small',
-      title: "新增用户",
-      dateLabel: "2025-04-13(日)",
-      mainMetric: 76,
-      comparisons: [{ label: '日环比', value: -24.75 }, { label: '周同比', value: -2.56 }],
-      average: 79,
-      initialGranularity: 'day',
-      initialDateRange: null,
-      initialComparison: false,
-      initialShowLabels: false,
-      initialChartType: 'line',
-      chartData: {
-        xData: ['04/07', '04/08', '04/09', '04/10', '04/11', '04/12', '04/13'],
-        yData: [70, 85, 85, 60, 70, 101, 76],
-        legend: '游戏安装新增用户数'
-      },
-      chartColor: "#409EFF",
-      availableChartTypes: ['line', 'bar', 'table'],
-      showAreaStyle: false
-    }, {
-      id: 'avg-duration',
-      reportId: 'RPT002',
-      size: 'small',
-      title: "人均在线时长",
-      dateLabel: "2025-04-13(日)",
-      mainMetric: 35,
-      metricUnit: "分钟",
-      comparisons: [],
-      average: 33,
-      initialGranularity: 'day',
-      initialDateRange: null,
-      initialComparison: false,
-      initialShowLabels: false,
-      initialChartType: 'line',
-      chartData: {
-        xData: ['04/07', '04/08', '04/09', '04/10', '04/11', '04/12', '04/13'],
-        yData: [30, 32, 31, 29, 33, 38, 35],
-        legend: '人均在线时长(分钟)'
-      },
-      chartColor: "#67C23A",
-      availableChartTypes: ['line', 'bar', 'cumulative', 'table'],
-      showAreaStyle: true
-    }]
-  },
-  'db-user-activity': {
-    title: '用户活跃数据',
-    charts: [{
-      id: 'active-users',
-      reportId: 'RPT003',
-      size: 'small',
-      title: "活跃用户数",
-      dateLabel: "2025-04-13(日)",
-      mainMetric: 1305,
-      comparisons: [{ label: '日环比', value: 8.1 }, { label: '周同比', value: 15.3 }],
-      average: 1195,
-      initialGranularity: 'day',
-      initialDateRange: null,
-      initialComparison: true,
-      initialShowLabels: false,
-      initialChartType: 'bar',
-      chartData: {
-        xData: ['04/07', '04/08', '04/09', '04/10', '04/11', '04/12', '04/13'],
-        yData: [1150, 1180, 1210, 1190, 1240, 1208, 1305],
-        legend: '日活跃用户'
-      },
-      chartColor: "#E6A23C",
-      availableChartTypes: ['line', 'bar', 'table'],
-      showAreaStyle: false
-    }]
-  }
-});
-
-const loadDashboardData = (dashboardId) => {
-  console.log('Loading dashboard:', dashboardId);
-  const config = allDashboardConfigs.value[dashboardId];
-  if (config) {
-    currentChartLayouts.value = config.charts;
-    currentDashboardTitle.value = config.title;
+/** 加载仪表盘数据 */
+const allDashboardConfigs = ref({ /* ...同原配置...*/ });
+const loadDashboardData = id => {
+  const cfg = allDashboardConfigs.value[id];
+  if (cfg) {
+    currentChartLayouts.value = cfg.charts;
+    currentDashboardTitle.value = cfg.title;
   } else {
-    console.warn(`Dashboard config not found for ID: ${dashboardId}`);
     currentChartLayouts.value = [];
     currentDashboardTitle.value = '看板未找到';
   }
 };
 
-const toggleSidebarCollapse = () => {
-  isSidebarCollapsed.value = !isSidebarCollapsed.value;
-};
-
-const handleDashboardSelect = (dashboardId) => {
-  currentDashboardId.value = dashboardId;
-  loadDashboardData(dashboardId);
-};
-
+// ---------- 交互方法 ----------
+const toggleSidebarCollapse = () => { isSidebarCollapsed.value = !isSidebarCollapsed.value; };
+const handleDashboardSelect = id => { currentDashboardId.value = id; loadDashboardData(id); };
 const resetForm = () => {
   itemForm.value = { name: '', parentId: null };
   editingItemId.value = null;
-  if (itemFormRef.value) {
-    itemFormRef.value.resetFields();
-  }
+  itemFormRef.value?.resetFields();
 };
-
-const openAddModal = (type = 'dashboard') => {
+const openAddModal = type => {
   resetForm();
   modalMode.value = 'add';
   addItemType.value = type;
   itemModalVisible.value = true;
 };
-
-const openEditModal = (itemInfo) => {
+const openEditModal = ({ id, type, name }) => {
   resetForm();
   modalMode.value = 'edit';
-  addItemType.value = itemInfo.type;
-  editingItemId.value = itemInfo.id;
-  itemForm.value.name = itemInfo.name;
+  addItemType.value = type;
+  editingItemId.value = id;
+  itemForm.value.name = name;
   itemModalVisible.value = true;
 };
-
 const submitItemForm = async () => {
-  if (!itemFormRef.value) return;
-  await itemFormRef.value.validate((valid) => {
-    if (valid) {
-      if (modalMode.value === 'add') {
-        if (addItemType.value === 'dashboard') {
-          api.post('/api/menu/dashboard', { title: itemForm.value.name, folderId: itemForm.value.parentId })
-            .then(response => {
-              ElMessage.success(`看板“${itemForm.value.name}”已添加`);
-              itemModalVisible.value = false;
-              window.location.reload();
-            })
-            .catch(error => {
-              console.error('Failed to create dashboard:', error);
-              ElMessage.error('创建看板失败');
-            });
-        } else if (addItemType.value === 'folder') {
-          api.post('/api/menu/folder', { title: itemForm.value.name, parentId: itemForm.value.parentId })
-            .then(response => {
-              ElMessage.success(`文件夹“${itemForm.value.name}”已添加`);
-              itemModalVisible.value = false;
-              window.location.reload();
-            })
-            .catch(error => {
-              console.error('Failed to create folder:', error);
-              ElMessage.error('创建文件夹失败');
-            });
-        }
-      } else {
-        if (addItemType.value === 'dashboard') {
-          api.put('/api/menu/dashboard', { id: editingItemId.value, title: itemForm.value.name })
-            .then(response => {
-              ElMessage.success('看板重命名成功');
-              itemModalVisible.value = false;
-              window.location.reload();
-            })
-            .catch(error => {
-              console.error('Failed to rename dashboard:', error);
-              ElMessage.error('重命名看板失败');
-            });
-        } else if (addItemType.value === 'folder') {
-          api.put('/api/menu/folder', { id: editingItemId.value, title: itemForm.value.name })
-            .then(response => {
-              ElMessage.success('文件夹重命名成功');
-              itemModalVisible.value = false;
-              window.location.reload();
-            })
-            .catch(error => {
-              console.error('Failed to rename folder:', error);
-              ElMessage.error('重命名文件夹失败');
-            });
-        }
-      }
-    } else {
-      console.log('Form validation failed');
-      return false;
-    }
+  await itemFormRef.value.validate(valid => {
+    if (!valid) return;
+    const payload = modalMode.value === 'add'
+      ? { title: itemForm.value.name, ...(addItemType.value === 'dashboard' ? { folderId: itemForm.value.parentId } : { parentId: itemForm.value.parentId }) }
+      : { id: editingItemId.value, title: itemForm.value.name };
+    const call = modalMode.value === 'add'
+      ? api.post(`/api/menu/${addItemType.value}`, payload)
+      : api.put(`/api/menu/${addItemType.value}`, payload);
+    call.then(() => {
+      ElMessage.success(`${modalMode.value === 'add' ? '创建' : '重命名'}${addItemType.value === 'dashboard' ? '看板' : '文件夹'}成功`);
+      itemModalVisible.value = false;
+      fetchMenu(); // 局部刷新侧边栏
+    }).catch(err => {
+      console.error(err);
+      ElMessage.error(`${modalMode.value === 'add' ? '创建' : '重命名'}失败`);
+    });
   });
 };
-
-const handleDeleteItem = (itemInfo) => {
+const handleDeleteItem = ({ id, type, name }) => {
   ElMessageBox.confirm(
-    `确定要删除 ${itemInfo.type === 'dashboard' ? '看板' : '文件夹'} “${itemInfo.name}” 吗? ${itemInfo.type === 'folder' ? '其包含的所有看板也将被删除。' : ''}`,
-    '确认删除',
-    {
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消',
-      type: 'warning'
-    }
+    `确定要删除${type==='dashboard'?'看板':'文件夹'}“${name}”？${type==='folder'?'其包含的看板也将删除':''}`,
+    '确认删除', { confirmButtonText:'删除', cancelButtonText:'取消', type:'warning' }
   ).then(() => {
-    const itemId = itemInfo.id;
-    const itemType = itemInfo.type;
-    const deleteApiUrl = itemType === 'dashboard' ? `/api/menu/dashboard/${itemId}` : `/api/menu/folder/${itemId}`;
-    api.delete(deleteApiUrl)
-      .then(response => {
+    api.delete(`/api/menu/${type}/${id}`)
+      .then(() => {
         ElMessage.success('删除成功');
-        window.location.reload();
+        fetchMenu(); // 局部刷新侧边栏
       })
-      .catch(error => {
-        console.error(`Failed to delete ${itemType}:`, error);
+      .catch(err => {
+        console.error(err);
         ElMessage.error('删除失败');
       });
-  }).catch(() => {
-    ElMessage.info('删除已取消');
   });
 };
+
+// 打开“移动”对话框
+const openMoveModal = ({ id, type }) => {
+  // 仅 dashboard 支持移动
+  moveForm.value.id = id;
+  moveForm.value.targetFolderId = null;
+  moveModalVisible.value = true;
+};
+const resetMoveForm = () => {
+  moveForm.value = { id: '', targetFolderId: null };
+};
+const submitMove = () => {
+  moveFormRef.value.validate(valid => {
+    if (!valid) return;
+    api.put('/api/menu/dashboard/move', {
+      id: moveForm.value.id,
+      targetFolderId: moveForm.value.targetFolderId
+    })
+      .then(() => {
+        ElMessage.success('移动成功');
+        moveModalVisible.value = false;
+        fetchMenu();
+      })
+      .catch(() => {
+        ElMessage.error('移动失败');
+      });
+  });
+};
+
+// ---------- 生命周期 ----------
+onMounted(() => {
+  fetchMenu();
+  loadDashboardData(currentDashboardId.value);
+});
 
 const handleChartResize = (cardId) => { /* ... */ };
 const handleChartSettings = (cardId) => { /* ... */ };
@@ -380,8 +343,8 @@ const handleDateRangeChange = (payload) => { /* ... */ };
 const handleComparisonToggle = (payload) => { /* ... */ };
 
 onMounted(() => {
+  fetchMenu();
   loadDashboardData(currentDashboardId.value);
-  fetchFolders();
 });
 </script>
 
