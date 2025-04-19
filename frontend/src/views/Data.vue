@@ -38,9 +38,16 @@
         <h2>{{ selectedMenuItemTitle }}</h2>
         <!-- Show "新建事件结构" button only on Meta Events page -->
         <el-button v-if="currentMenuItem === 'data-management-meta-events'" type="primary" :icon="Plus" @click="openSchemaModal('add')">新建事件结构</el-button>
+        <!-- Show tab switcher on Realtime Data page -->
+        <div v-if="currentMenuItem === 'tracking-management-realtime'">
+          <el-radio-group v-model="realtimeSubView" @change="handleRealtimeSubViewChange">
+            <el-radio-button label="ingested">实时入库</el-radio-button>
+            <el-radio-button label="errored">错误数据</el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
 
-      <!-- Content based on selected menu item -->
+      <!-- Content based on selected menu item and sub-view -->
       <!-- Meta Events Content -->
       <div v-if="currentMenuItem === 'data-management-meta-events'">
         <el-table :data="eventSchemas" v-loading="loading" style="width: 100%">
@@ -64,34 +71,67 @@
       </div>
       <!-- Realtime Data Content -->
       <div v-else-if="currentMenuItem === 'tracking-management-realtime'">
-        <el-table :data="realtimeEvents" v-loading="loadingRealtime" style="width: 100%">
-          <el-table-column prop="timestamp" label="时间">
-            <template #default="scope">
-              {{ formatTimestamp(scope.row.timestamp) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="eventName" label="事件名称"></el-table-column>
-          <el-table-column prop="userId" label="用户ID"></el-table-column>
-          <el-table-column prop="deviceId" label="设备ID"></el-table-column>
-          <el-table-column label="参数">
-            <template #default="scope">
-              <pre>{{ formatEventParameters(scope.row.parameters) }}</pre>
-            </template>
-          </el-table-column>
-        </el-table>
-        <!-- Pagination -->
-        <el-pagination
-          v-if="realtimePagination.total > realtimePagination.pageSize"
-          @current-change="handleRealtimePageChange"
-          :current-page="realtimePagination.currentPage"
-          :page-size="realtimePagination.pageSize"
-          layout="total, prev, pager, next"
-          :total="realtimePagination.total">
-        </el-pagination>
+        <!-- Realtime Ingested Data Table -->
+        <div v-show="realtimeSubView === 'ingested'">
+          <el-table :data="realtimeEventsIngested" v-loading="loadingRealtime" style="width: 100%">
+            <el-table-column prop="timestamp" label="时间" width="180">
+              <template #default="scope">
+                {{ formatTimestamp(scope.row.timestamp) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="eventName" label="事件名称"></el-table-column>
+            <el-table-column prop="userId" label="用户ID"></el-table-column>
+            <el-table-column prop="deviceId" label="设备ID"></el-table-column>
+            <el-table-column label="参数">
+              <template #default="scope">
+                <pre>{{ formatEventParameters(scope.row.parameters) }}</pre>
+              </template>
+            </el-table-column>
+          </el-table>
+          <!-- Pagination for Ingested Data -->
+          <el-pagination
+            v-if="realtimePaginationIngested.total > realtimePaginationIngested.pageSize"
+            @current-change="handleRealtimeIngestedPageChange"
+            :current-page="realtimePaginationIngested.currentPage"
+            :page-size="realtimePaginationIngested.pageSize"
+            layout="total, prev, pager, next"
+            :total="realtimePaginationIngested.total">
+          </el-pagination>
+        </div>
+
+        <!-- Errored Data Table -->
+        <div v-show="realtimeSubView === 'errored'">
+          <el-table :data="realtimeEventsErrored" v-loading="loadingRealtime" style="width: 100%">
+            <el-table-column prop="receivedTimestamp" label="接收时间" width="180">
+              <template #default="scope">
+                {{ formatTimestamp(scope.row.receivedTimestamp) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="eventName" label="事件名称"></el-table-column>
+            <el-table-column prop="userId" label="用户ID"></el-table-column>
+            <el-table-column prop="deviceId" label="设备ID"></el-table-column>
+            <el-table-column prop="errorReason" label="错误原因"></el-table-column>
+            <el-table-column label="原始参数">
+              <template #default="scope">
+                <pre>{{ formatEventParameters(scope.row.rawParameters) }}</pre>
+              </template>
+            </el-table-column>
+          </el-table>
+          <!-- Pagination for Errored Data -->
+          <el-pagination
+            v-if="realtimePaginationErrored.total > realtimePaginationErrored.pageSize"
+            @current-change="handleRealtimeErroredPageChange"
+            :current-page="realtimePaginationErrored.currentPage"
+            :page-size="realtimePaginationErrored.pageSize"
+            layout="total, prev, pager, next"
+            :total="realtimePaginationErrored.total">
+          </el-pagination>
+        </div>
       </div>
       <div v-else>
         <!-- Placeholder for other content sections -->
         <p>这是 "{{ selectedMenuItemTitle }}" 的内容区域。</p>
+        <!-- TODO: 根据 currentMenuItem 的值使用 v-else-if 或动态组件来加载实际的内容组件 -->
       </div>
 
 
@@ -134,17 +174,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed, shallowRef, onUnmounted, watch } from 'vue'; // Import onUnmounted and watch
+import { ref, onMounted, reactive, computed, shallowRef, onUnmounted, watch } from 'vue';
 import TopNav from "@/components/TopNav.vue";
 import {
   ElMessage, ElMessageBox, ElTable, ElTableColumn, ElButton, ElPopconfirm,
   ElDialog, ElForm, ElFormItem, ElInput, ElSelect, ElCheckbox, ElLoading,
   ElContainer, ElAside, ElMain, ElScrollbar, ElMenu, ElSubMenu, ElMenuItem, ElIcon,
-  ElPagination // Import ElPagination
+  ElPagination, ElRadioGroup, ElRadioButton // Import Radio components
 } from 'element-plus';
 import { Plus, Delete, DArrowLeft, DArrowRight, Setting, Document, DataAnalysis, Monitor, Bell, Grid, List } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
-import api from "@/api/index.js"; // Import dayjs for timestamp formatting (install if needed: npm install dayjs)
+import api from "@/api/index.js"; // Make sure dayjs is installed and imported
 
 
 // --- Sidebar State and Logic (remains the same) ---
@@ -212,13 +252,16 @@ const handleMenuSelect = (index) => {
   if (index === 'data-management-meta-events') {
     fetchEventSchemas();
   } else if (index === 'tracking-management-realtime') {
-    // Start realtime data fetching and refresh
-    fetchRealtimeEvents();
-    startRealtimeRefresh();
+    // Reset sub-view to default and fetch data for it
+    realtimeSubView.value = 'ingested'; // Default to '实时入库'
+    resetRealtimePagination(); // Reset pagination for both views
+    fetchRealtimeDataForCurrentSubView(); // Fetch data for the default sub-view
+    startRealtimeRefresh(); // Start refresh timer
   } else {
     // Clear data and close modal for other items
     eventSchemas.value = [];
-    realtimeEvents.value = [];
+    realtimeEventsIngested.value = [];
+    realtimeEventsErrored.value = [];
     schemaModalVisible.value = false;
   }
 };
@@ -270,12 +313,55 @@ const formatParameterSchema = (jsonString) => {
   }
 };
 
-// ... openSchemaModal, resetSchemaForm, addParameter, removeParameter, submitSchemaForm, deleteSchema remain the same ...
-const openSchemaModal = (mode, schema = null) => { /* ... */ };
-const resetSchemaForm = () => { /* ... */ };
-const addParameter = () => { /* ... */ };
-const removeParameter = (index) => { /* ... */ };
-const submitSchemaForm = async () => { /* ... added check for currentMenuItem before fetchSchemas ... */
+// ... openSchemaModal, resetSchemaForm, addParameter, removeParameter, submitSchemaForm, deleteSchema remain the same, added check for currentMenuItem before fetchSchemas ...
+const openSchemaModal = (mode, schema = null) => {
+  modalMode.value = mode;
+  resetSchemaForm();
+  if (mode === 'edit' && schema) {
+    currentSchemaId.value = schema.id;
+    schemaForm.eventName = schema.eventName;
+    if (schema.parameterSchema) {
+      try {
+        const params = JSON.parse(schema.parameterSchema);
+        schemaForm.parameters = Object.keys(params).map(key => {
+          const paramDef = params[key];
+          if (typeof paramDef === 'string') {
+            return { name: key, type: paramDef, required: false };
+          } else if (typeof paramDef === 'object' && paramDef !== null) {
+            return {
+              name: key,
+              type: paramDef.type || '',
+              required: paramDef.required || false
+            };
+          }
+          return { name: key, type: '', required: false };
+        });
+      } catch (e) {
+        console.error('Failed to parse parameter schema:', e);
+        ElMessage.error('解析参数结构进行编辑失败');
+      }
+    }
+  }
+  schemaModalVisible.value = true;
+};
+
+const resetSchemaForm = () => {
+  currentSchemaId.value = null;
+  schemaForm.eventName = '';
+  schemaForm.parameters = [];
+  if (schemaFormRef.value) {
+    schemaFormRef.value.resetFields();
+  }
+};
+
+const addParameter = () => {
+  schemaForm.parameters.push({ name: '', type: '', required: false });
+};
+
+const removeParameter = (index) => {
+  schemaForm.parameters.splice(index, 1);
+};
+const submitSchemaForm = async () => {
   if (!schemaFormRef.value) return;
   await schemaFormRef.value.validate(async (valid) => {
     if (valid) {
@@ -337,46 +423,90 @@ const deleteSchema = async (id) => {
 
 
 // --- Realtime Data State and Logic ---
-const realtimeEvents = ref([]);
+const realtimeSubView = ref('ingested'); // 'ingested' or 'errored'
+const realtimeEventsIngested = ref([]);
+const realtimeEventsErrored = ref([]);
 const loadingRealtime = ref(false);
-const realtimePagination = reactive({
+
+// Separate pagination for each sub-view
+const realtimePaginationIngested = reactive({
   currentPage: 1,
   pageSize: 10,
   total: 0
 });
+const realtimePaginationErrored = reactive({
+  currentPage: 1,
+  pageSize: 10,
+  total: 0
+});
+
 let realtimeRefreshTimer = null; // Timer instance
+const REALTIME_REFRESH_INTERVAL = 5000; // Refresh interval in milliseconds (e.g., 5 seconds)
 
 
-// Fetch realtime events from backend
-const fetchRealtimeEvents = async () => {
-  if (currentMenuItem.value !== 'tracking-management-realtime') {
-    console.log('Not on Realtime Data page, skipping realtime fetch.');
+// Fetch data based on the currently selected realtime sub-view
+const fetchRealtimeDataForCurrentSubView = async () => {
+  if (realtimeSubView.value === 'ingested') {
+    await fetchRealtimeIngestedEvents();
+  } else if (realtimeSubView.value === 'errored') {
+    await fetchRealtimeErroredEvents();
+  }
+};
+
+// Fetch realtime ingested events from backend
+const fetchRealtimeIngestedEvents = async () => {
+  if (currentMenuItem.value !== 'tracking-management-realtime' || realtimeSubView.value !== 'ingested') {
+    console.log('Not on Realtime Ingested Data view, skipping fetch.');
     return;
   }
 
   loadingRealtime.value = true;
   try {
     // Backend page is 0-indexed, frontend is 1-indexed
-    const page = realtimePagination.currentPage - 1;
-    const size = realtimePagination.pageSize;
+    const page = realtimePaginationIngested.currentPage - 1;
+    const size = realtimePaginationIngested.pageSize;
     const response = await api.get(`/api/data/realtime?page=${page}&size=${size}`);
-    realtimeEvents.value = response.data.content; // Spring Data Page returns content in 'content' field
-    realtimePagination.total = response.data.totalElements; // Total number of elements
-    console.log("Fetched realtime events:", realtimeEvents.value);
+    realtimeEventsIngested.value = response.data.content; // Spring Data Page returns content in 'content' field
+    realtimePaginationIngested.total = response.data.totalElements; // Total number of elements
+    console.log("Fetched realtime ingested events:", realtimeEventsIngested.value);
   } catch (error) {
-    console.error('Failed to fetch realtime events:', error);
-    ElMessage.error('加载实时数据失败');
+    console.error('Failed to fetch realtime ingested events:', error);
+    ElMessage.error('加载实时入库数据失败');
   } finally {
     loadingRealtime.value = false;
   }
 };
 
+// Fetch realtime errored events from backend
+const fetchRealtimeErroredEvents = async () => {
+  if (currentMenuItem.value !== 'tracking-management-realtime' || realtimeSubView.value !== 'errored') {
+    console.log('Not on Realtime Errored Data view, skipping fetch.');
+    return;
+  }
+
+  loadingRealtime.value = true;
+  try {
+    // Backend page is 0-indexed, frontend is 1-indexed
+    const page = realtimePaginationErrored.currentPage - 1;
+    const size = realtimePaginationErrored.pageSize;
+    const response = await api.get(`/api/data/errored?page=${page}&size=${size}`); // New endpoint
+    realtimeEventsErrored.value = response.data.content;
+    realtimePaginationErrored.total = response.data.totalElements;
+    console.log("Fetched realtime errored events:", realtimeEventsErrored.value);
+  } catch (error) {
+    console.error('Failed to fetch realtime errored events:', error);
+    ElMessage.error('加载错误数据失败');
+  } finally {
+    loadingRealtime.value = false;
+  }
+};
+
+
 // Start the realtime refresh timer
 const startRealtimeRefresh = () => {
-  // Clear any existing timer first
-  stopRealtimeRefresh();
-  // Set a new interval timer (e.g., every 5 seconds)
-  realtimeRefreshTimer = setInterval(fetchRealtimeEvents, 5000); // Refresh every 5 seconds
+  stopRealtimeRefresh(); // Clear any existing timer
+  // Set a new interval timer to fetch data for the currently active sub-view
+  realtimeRefreshTimer = setInterval(fetchRealtimeDataForCurrentSubView, REALTIME_REFRESH_INTERVAL);
   console.log("Realtime refresh started.");
 };
 
@@ -389,15 +519,42 @@ const stopRealtimeRefresh = () => {
   }
 };
 
-// Handle page change for realtime data pagination
-const handleRealtimePageChange = (newPage) => {
-  realtimePagination.currentPage = newPage;
-  fetchRealtimeEvents(); // Fetch data for the new page
+// Handle sub-view change within Realtime Data
+const handleRealtimeSubViewChange = (newSubView) => {
+  realtimeSubView.value = newSubView;
+  // Reset pagination for the newly selected sub-view and fetch data
+  if (newSubView === 'ingested') {
+    realtimePaginationIngested.currentPage = 1;
+  } else if (newSubView === 'errored') {
+    realtimePaginationErrored.currentPage = 1;
+  }
+  fetchRealtimeDataForCurrentSubView(); // Fetch data for the new sub-view
+  // The timer is already running and will pick up the new sub-view on the next tick
+};
+
+// Handle page change for Realtime Ingested Data pagination
+const handleRealtimeIngestedPageChange = (newPage) => {
+  realtimePaginationIngested.currentPage = newPage;
+  fetchRealtimeIngestedEvents(); // Fetch data for the new page
+};
+
+// Handle page change for Realtime Errored Data pagination
+const handleRealtimeErroredPageChange = (newPage) => {
+  realtimePaginationErrored.currentPage = newPage;
+  fetchRealtimeErroredEvents(); // Fetch data for the new page
+};
+
+// Reset pagination for both views
+const resetRealtimePagination = () => {
+  realtimePaginationIngested.currentPage = 1;
+  realtimePaginationErrored.currentPage = 1;
+  // Total will be updated by the fetch calls
 };
 
 // Format timestamp for display
 const formatTimestamp = (timestamp) => {
   // Timestamps from backend are likely milliseconds since epoch
+  if (!timestamp) return '';
   return dayjs(timestamp).format('YYYY-MM-DD HH:mm:ss');
 };
 
@@ -405,7 +562,7 @@ const formatTimestamp = (timestamp) => {
 const formatEventParameters = (parameters) => {
   if (!parameters) return '无参数';
   // Parameters are stored as JSON string in the backend GameEvent model,
-  // but axios might automatically parse it back into an object/map if content type is JSON.
+  // but api might automatically parse it back into an object/map if content type is JSON.
   // If it's still a string, parse it first.
   let paramsObject = parameters;
   if (typeof parameters === 'string') {
@@ -424,12 +581,14 @@ const formatEventParameters = (parameters) => {
 // --- Lifecycle Hooks ---
 onMounted(() => {
   // When the component is mounted, check the default menu item
-  // and load the corresponding content (Event Schemas or Realtime Data)
+  // and load the corresponding content
   if (currentMenuItem.value === 'data-management-meta-events') {
     fetchEventSchemas();
   } else if (currentMenuItem.value === 'tracking-management-realtime') {
-    fetchRealtimeEvents();
-    startRealtimeRefresh();
+    realtimeSubView.value = 'ingested'; // Default to '实时入库'
+    resetRealtimePagination();
+    fetchRealtimeDataForCurrentSubView(); // Fetch initial data
+    startRealtimeRefresh(); // Start refresh timer
   }
 });
 
@@ -438,17 +597,22 @@ onUnmounted(() => {
   stopRealtimeRefresh();
 });
 
-// Watch for changes in currentMenuItem to stop/start timer as needed
+// Watch for changes in currentMenuItem to stop/start timer and clear data as needed
 watch(currentMenuItem, (newValue, oldValue) => {
-  // If moving *away* from realtime view, stop the timer
+  // Stop realtime refresh when switching away from realtime view
   if (oldValue === 'tracking-management-realtime') {
     stopRealtimeRefresh();
+    realtimeEventsIngested.value = []; // Clear data when leaving the view
+    realtimeEventsErrored.value = [];
+    resetRealtimePagination(); // Reset pagination when leaving the view
   }
-  // If moving *to* realtime view, start the timer
+
+  // Start realtime data fetching and refresh when switching to realtime view
   if (newValue === 'tracking-management-realtime') {
-    // Ensure we fetch data immediately when navigating to the page
-    fetchRealtimeEvents();
-    startRealtimeRefresh();
+    realtimeSubView.value = 'ingested'; // Default to '实时入库'
+    resetRealtimePagination();
+    fetchRealtimeDataForCurrentSubView(); // Fetch initial data
+    startRealtimeRefresh(); // Start refresh timer
   }
 });
 </script>
@@ -488,7 +652,6 @@ watch(currentMenuItem, (newValue, oldValue) => {
   border-right: none; /* Remove default border */
 }
 
-
 /* Main content area styles */
 .schema-manager-content {
   padding: 20px;
@@ -500,12 +663,16 @@ watch(currentMenuItem, (newValue, oldValue) => {
   transition: margin-left 0.3s ease; /* Smooth transition for margin when collapsing */
 }
 
-/* Header styles (remains the same) */
+/* Header styles (remains the same, adjusted for radio group) */
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  /* Allow flex items to wrap if needed */
+  flex-wrap: wrap;
+  /* Add some gap between items */
+  gap: 10px;
 }
 
 .header h2 {
@@ -513,9 +680,11 @@ watch(currentMenuItem, (newValue, oldValue) => {
   font-size: 20px;
   font-weight: 600;
   color: #303133;
+  /* Prevent title from shrinking much */
+  flex-shrink: 0;
 }
 
-/* Styles for parameter list in modal (reused) */
+/* Parameter list styles (remains the same) */
 .parameter-list {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
@@ -564,7 +733,7 @@ pre {
   word-wrap: break-word; /* Break long words */
 }
 
-/* Optional: style for table header/rows */
+/* Optional: style for table header/rows (remains the same) */
 .el-table th {
   background-color: #f5f7fa !important;
   color: #909399;
