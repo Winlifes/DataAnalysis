@@ -25,4 +25,7 @@ public class GameEvent {
     @Column(columnDefinition = "JSON") // Use JSON type if your MySQL supports it
     // If JSON type is not supported, use @Column(columnDefinition = "TEXT")
     private String parameters; // Store parameters as a JSON string
+
+    @Column(columnDefinition = "JSON") // 新增字段存储用户属性 JSON 字符串
+    private String userProperties;
 }

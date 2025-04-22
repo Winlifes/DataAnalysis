@@ -7,9 +7,13 @@ import com.winlife.dataanalysis.dto.GameEventDTO;
 import com.winlife.dataanalysis.model.GameEvent;
 import com.winlife.dataanalysis.model.EventSchema;
 import com.winlife.dataanalysis.model.ErroredGameEvent;
+import com.winlife.dataanalysis.model.DebugGameEvent;
+import com.winlife.dataanalysis.model.UserPropertySchema; // Import UserPropertySchema
 import com.winlife.dataanalysis.repository.GameEventRepository;
 import com.winlife.dataanalysis.repository.EventSchemaRepository;
 import com.winlife.dataanalysis.repository.ErroredGameEventRepository;
+import com.winlife.dataanalysis.repository.DebugGameEventRepository;
+import com.winlife.dataanalysis.repository.UserPropertySchemaRepository; // Import UserPropertySchemaRepository
 import com.winlife.dataanalysis.service.DataIngestionService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -19,6 +23,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.Instant;
 import java.util.Iterator;
@@ -33,21 +38,52 @@ public class DataIngestionServiceImpl implements DataIngestionService {
     private final GameEventRepository gameEventRepository;
     private final EventSchemaRepository eventSchemaRepository;
     private final ErroredGameEventRepository erroredGameEventRepository;
+    private final DebugGameEventRepository debugGameEventRepository;
+    private final UserPropertySchemaRepository userPropertySchemaRepository; // Inject UserPropertySchemaRepository
     private final ObjectMapper objectMapper;
 
     @Override
-    @Transactional // 确保事务注解存在
-    public boolean processGameEvent(GameEventDTO event) { // 返回类型改为 boolean
-        String validationError = validateEvent(event); // validateEvent 返回错误原因字符串或 null
+    @Transactional
+    public boolean processGameEvent(GameEventDTO event) {
+        // Validate event parameters against event schema
+        String eventValidationError = validateEvent(event);
+        boolean isEventValid = eventValidationError == null;
 
-        if (validationError != null) {
-            logger.warn("Invalid game event received based on schema validation: {}. Reason: {}", event, validationError);
-            saveErroredEvent(event, validationError);
-            // 返回 false 表示验证失败或已存入错误表
-            return false;
+        // Validate user properties against user property schema
+        String userPropertiesValidationError = validateUserProperties(event.getUserProperties());
+        boolean areUserPropertiesValid = userPropertiesValidationError == null;
+
+        // Combine validation results
+        boolean isEventAndPropertiesValid = isEventValid && areUserPropertiesValid;
+
+        String combinedValidationError = null;
+        if (!isEventValid) {
+            combinedValidationError = "Event validation failed: " + eventValidationError;
+        }
+        if (!areUserPropertiesValid) {
+            if (combinedValidationError == null) {
+                combinedValidationError = "User properties validation failed: " + userPropertiesValidationError;
+            } else {
+                combinedValidationError += "; User properties validation failed: " + userPropertiesValidationError;
+            }
         }
 
-        // 2. Save event if valid
+
+        if (event.getIsDebug() == 1) {
+            // If in debug mode, save to debug table with combined validation result
+            saveDebugEvent(event, isEventAndPropertiesValid, combinedValidationError);
+            return false; // Indicates not saved to main table
+        }
+
+        // If not in debug mode, proceed based on combined validation result
+        if (!isEventAndPropertiesValid) {
+            logger.warn("Invalid game event or user properties received. Event: {}, User Properties: {}. Reason: {}", event.getEventName(), event.getUserProperties(), combinedValidationError);
+            // Save to error table with the combined reason
+            saveErroredEvent(event, combinedValidationError);
+            return false; // Indicates validation failure and saved to error table
+        }
+
+        // 2. Save event if valid and not in debug mode
         GameEvent gameEvent = new GameEvent();
         gameEvent.setUserId(event.getUserId());
         gameEvent.setDeviceId(event.getDeviceId());
@@ -55,54 +91,76 @@ public class DataIngestionServiceImpl implements DataIngestionService {
         gameEvent.setEventName(event.getEventName());
 
         try {
+            // Save event parameters (which were validated)
             gameEvent.setParameters(objectMapper.writeValueAsString(event.getParameters()));
         } catch (JsonProcessingException e) {
             logger.error("Failed to serialize event parameters for valid event {}: {}", event.getEventName(), event.getParameters(), e);
-            // 如果有效事件的参数序列化失败，视为入库异常，保存到错误表并返回 false
-            saveErroredEvent(event, "Failed to serialize parameters for valid event: " + e.getMessage());
+            // This shouldn't happen if validation passed and object is serializable, but as a fallback
+            saveErroredEvent(event, "Failed to serialize valid event parameters: " + e.getMessage());
             return false;
         }
 
         try {
+            // Save user properties (which were validated)
+            gameEvent.setUserProperties(objectMapper.writeValueAsString(event.getUserProperties()));
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to serialize user properties for event {}: {}", event.getEventName(), event.getUserProperties(), e);
+            // If serialization fails for valid user properties, save to errored events and return false
+            saveErroredEvent(event, "Failed to serialize valid user properties: " + e.getMessage());
+            return false;
+        }
+
+
+        try {
             gameEventRepository.save(gameEvent);
-            logger.debug("Successfully saved valid game event: {}", event.getEventName());
-            // 返回 true 表示有效且成功入库
-            return true;
+            logger.debug("Successfully saved valid game event with user properties: {}", event.getEventName());
+            return true; // Indicates valid and saved to main table
         } catch (Exception e) {
-            logger.error("Failed to save game event to GameEvent table for event {}: {}", event.getEventName(), e.getMessage(), e);
-            // 如果保存到主表失败，保存到错误表并返回 false
+            logger.error("Failed to save game event with user properties to GameEvent table for event {}: {}", event.getEventName(), e.getMessage(), e);
+            // If saving to the main table fails, save to errored events and return false
             saveErroredEvent(event, "Failed to save to main game_events table: " + e.getMessage());
             return false;
         }
     }
 
     /**
-     * 保存错误的游戏事件到错误表中
-     *
-     * @param event       原始的 GameEventDTO
-     * @param errorReason 验证失败的原因或入库异常原因
+     * Saves an errored game event to the error table.
+     * @param event The original GameEventDTO.
+     * @param errorReason The reason for validation failure or ingestion exception.
      */
     private void saveErroredEvent(GameEventDTO event, String errorReason) {
         ErroredGameEvent erroredEvent = new ErroredGameEvent();
         erroredEvent.setUserId(event.getUserId());
         erroredEvent.setDeviceId(event.getDeviceId());
-        erroredEvent.setTimestamp(event.getTimestamp()); // 原始事件时间戳
+        erroredEvent.setTimestamp(event.getTimestamp());
         erroredEvent.setEventName(event.getEventName());
         erroredEvent.setErrorReason(errorReason);
-        // 记录后端接收到这个事件（无论是有效还是无效，只要进入处理流程）的时间
         erroredEvent.setReceivedTimestamp(Instant.now().toEpochMilli());
 
         try {
-            // 尝试将原始参数序列化为 JSON 字符串进行存储
+            // Attempt to serialize original event parameters
             erroredEvent.setRawParameters(objectMapper.writeValueAsString(event.getParameters()));
         } catch (JsonProcessingException e) {
-            logger.error("Failed to serialize raw parameters for errored event {}: {}", event.getEventName(), event.getParameters(), e);
-            // 如果原始参数序列化失败，将 rawParameters 设置为 null
+            logger.error("Failed to serialize raw event parameters for errored event {}: {}", event.getEventName(), event.getParameters(), e);
             erroredEvent.setRawParameters(null);
-            // 注意：这里的序列化失败通常是ObjectMapper配置或数据本身的问题，
-            // 如果是因为参数本身格式问题导致序列化失败，可以将错误原因更新。
-            erroredEvent.setErrorReason("Failed to serialize raw parameters: " + e.getMessage()); // 可以选择覆盖之前的错误原因
         }
+
+        // ErroredGameEvent does not store user properties separately, they are part of the raw event if needed.
+        // If you want to store raw user properties explicitly in ErroredGameEvent, add a column for it.
+        // For now, they are implicitly part of the raw event data if you save the whole raw DTO JSON.
+        // But the user wants to save rawParameters and validation error.
+        // Let's add a rawUserProperties field to ErroredGameEvent model. (Done in Step 2 for Debug, add for Errored too)
+        // --> Update: UserProperties are added to GameEvent and DebugGameEvent. Let's update ErroredGameEvent too.
+
+//        try {
+//            // Attempt to serialize original user properties
+//            // Need to update ErroredGameEvent entity first
+//            erroredEvent.setRawUserProperties(objectMapper.writeValueAsString(event.getUserProperties()));
+//        } catch (JsonProcessingException e) {
+//            logger.error("Failed to serialize raw user properties for errored event {}: {}", event.getEventName(), event.getUserProperties(), e);
+//            erroredEvent.setRawUserProperties(null);
+//        }
+
 
         try {
             logger.debug("Attempting to save errored event with name: {}, reason: {}", erroredEvent.getEventName(), erroredEvent.getErrorReason());
@@ -110,7 +168,49 @@ public class DataIngestionServiceImpl implements DataIngestionService {
             logger.debug("Successfully saved errored game event with ID: {}", savedEvent.getId());
         } catch (Exception e) {
             logger.error("Failed to save errored game event for event {}: {}", event.getEventName(), e.getMessage(), e);
-            // 打印更详细的错误堆栈
+            logger.error("Error details:", e);
+        }
+    }
+
+    /**
+     * Saves a game event received in debug mode to the debug table.
+     * @param event The original GameEventDTO.
+     * @param isValid Whether the event and its user properties were valid according to schemas.
+     * @param validationError The combined reason for validation failure if not valid.
+     */
+    private void saveDebugEvent(GameEventDTO event, boolean isValid, String validationError) {
+        DebugGameEvent debugEvent = new DebugGameEvent();
+        debugEvent.setUserId(event.getUserId());
+        debugEvent.setDeviceId(event.getDeviceId());
+        debugEvent.setTimestamp(event.getTimestamp());
+        debugEvent.setEventName(event.getEventName());
+        debugEvent.setValid(isValid);
+        debugEvent.setValidationError(validationError);
+        debugEvent.setReceivedTimestamp(Instant.now().toEpochMilli());
+
+        try {
+            // Save raw event parameters
+            debugEvent.setRawParameters(objectMapper.writeValueAsString(event.getParameters()));
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to serialize raw event parameters for debug event {}: {}", event.getEventName(), event.getParameters(), e);
+            debugEvent.setRawParameters(null);
+        }
+
+        try {
+            // Save raw user properties
+            debugEvent.setRawUserProperties(objectMapper.writeValueAsString(event.getUserProperties()));
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to serialize raw user properties for debug event {}: {}", event.getEventName(), event.getUserProperties(), e);
+            debugEvent.setRawUserProperties(null);
+        }
+
+
+        try {
+            logger.debug("Attempting to save debug event with name: {}, isValid: {}", debugEvent.getEventName(), debugEvent.isValid());
+            DebugGameEvent savedEvent = debugGameEventRepository.save(debugEvent);
+            logger.debug("Successfully saved debug game event with ID: {}", savedEvent.getId());
+        } catch (Exception e) {
+            logger.error("Failed to save debug game event for event {}: {}", event.getEventName(), e.getMessage(), e);
             logger.error("Error details:", e);
         }
     }
@@ -128,78 +228,72 @@ public class DataIngestionServiceImpl implements DataIngestionService {
         return erroredGameEventRepository.findAll(pageRequest);
     }
 
-
-    /**
-     * Validates the game event against the defined Schema.
-     * Returns null if valid, otherwise returns a String describing the validation error.
-     *
-     * @param event The received game event DTO.
-     * @return Null if valid, or error reason string.
-     */
-    private String validateEvent(GameEventDTO event) {
-        // ... (验证逻辑保持不变，确保在返回错误信息时有日志打印) ...
-
-        if (event == null) {
-            logger.debug("Validation failed: Received null event.");
-            return "Received null event.";
+    @Override
+    public Page<DebugGameEvent> getRecentDebugEvents(int page, int size, String deviceId) {
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("receivedTimestamp").descending());
+        if (StringUtils.hasText(deviceId)) {
+            return debugGameEventRepository.findByDeviceIdOrderByReceivedTimestampDesc(deviceId, pageRequest);
+        } else {
+            return debugGameEventRepository.findAllByOrderByReceivedTimestampDesc(pageRequest);
         }
-        if (event.getEventName() == null || event.getEventName().trim().isEmpty()) {
-            logger.debug("Validation failed: Received event with empty or null event name: {}", event);
-            return "Received event with empty or null event name.";
-        }
+    }
 
+    @Override
+    public String validateUserProperties(Map<String, Object> userProperties) {
+        Optional<UserPropertySchema> schemaOptional = userPropertySchemaRepository.findFirstByOrderByIdAsc();
 
-        Optional<EventSchema> schemaOptional = eventSchemaRepository.findByEventName(event.getEventName());
-
+        // Policy: If no user property schema is defined, allow the user properties.
         if (schemaOptional.isEmpty()) {
-            logger.debug("No schema found for event: {}. Allowing event.", event.getEventName());
-            return "No schema found for event."; // Valid
-        }
-
-        EventSchema schema = schemaOptional.get();
-        Map<String, Object> receivedParameters = event.getParameters();
-
-        if (schema.getParameterSchema() == null || schema.getParameterSchema().trim().isEmpty() || "{}".equals(schema.getParameterSchema().trim())) {
-            if (receivedParameters != null && !receivedParameters.isEmpty()) {
-                String reason = "Event has parameters but schema expects none. Received parameters: " + receivedParameters;
-                logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                return reason;
-            }
+            logger.debug("No user property schema found. Allowing user properties.");
             return null; // Valid
         }
 
+        UserPropertySchema schema = schemaOptional.get();
+        // Reuse the same validation logic as for event parameters, but with the user property schema
+        return validateProperties(userProperties, schema.getPropertySchema(), "User Property");
+    }
+
+
+    /**
+     * Reusable validation logic for properties map against a JSON schema string.
+     * @param properties The map of properties (event parameters or user properties).
+     * @param schemaJson The JSON string defining the schema.
+     * @param propertyTypeLabel Label for logging (e.g., "Event Parameter", "User Property").
+     * @return Null if valid, or error reason string.
+     */
+    private String validateProperties(Map<String, Object> properties, String schemaJson, String propertyTypeLabel) {
+        if (schemaJson == null || schemaJson.trim().isEmpty() || "{}".equals(schemaJson.trim())) {
+            if (properties != null && !properties.isEmpty()) {
+                return propertyTypeLabel + "s received but schema expects none. Received: " + properties;
+            }
+            return null; // Valid (no properties expected, none received)
+        }
 
         JsonNode schemaNode;
         try {
-            schemaNode = objectMapper.readTree(schema.getParameterSchema());
+            schemaNode = objectMapper.readTree(schemaJson);
             if (!schemaNode.isObject()) {
-                String reason = "Event schema for '" + event.getEventName() + "' is not a valid JSON object: " + schema.getParameterSchema();
-                logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                return reason;
+                return propertyTypeLabel + " schema is not a valid JSON object: " + schemaJson;
             }
         } catch (JsonProcessingException e) {
-            logger.error("Failed to parse parameter schema JSON for event: {}", event.getEventName(), e);
-            String reason = "Failed to parse event schema JSON.";
-            logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-            return reason;
+            logger.error("Failed to parse " + propertyTypeLabel + " schema JSON: {}", schemaJson, e);
+            return "Failed to parse " + propertyTypeLabel + " schema JSON.";
         } catch (Exception e) {
-            logger.error("Error processing event schema for event: {}", event.getEventName(), e);
-            String reason = "Error processing event schema.";
-            logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-            return reason;
+            logger.error("Error processing " + propertyTypeLabel + " schema: {}", schemaJson, e);
+            return "Error processing " + propertyTypeLabel + " schema.";
         }
 
 
-        if (receivedParameters != null) {
-            for (Map.Entry<String, Object> receivedParam : receivedParameters.entrySet()) {
+        // Validate properties present in the received map
+        if (properties != null) {
+            for (Map.Entry<String, Object> receivedParam : properties.entrySet()) {
                 String paramName = receivedParam.getKey();
                 Object receivedValue = receivedParam.getValue();
+
                 JsonNode paramSchema = schemaNode.get(paramName);
 
                 if (paramSchema == null) {
-                    String reason = "Event '" + event.getEventName() + "' has unexpected parameter: " + paramName;
-                    logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                    return reason;
+                    return propertyTypeLabel + " '" + paramName + "' is unexpected.";
                 }
 
                 String expectedType = null;
@@ -209,59 +303,41 @@ public class DataIngestionServiceImpl implements DataIngestionService {
                     expectedType = paramSchema.asText().toLowerCase();
                 } else if (paramSchema.isObject()) {
                     if (!paramSchema.has("type")) {
-                        String reason = "Parameter '" + paramName + "' in schema for event '" + event.getEventName() + "' is object but missing 'type'.";
-                        logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                        return reason;
+                        return propertyTypeLabel + " '" + paramName + "' schema is object but missing 'type'.";
                     }
                     expectedType = paramSchema.get("type").asText().toLowerCase();
                     isRequired = paramSchema.has("required") ? paramSchema.get("required").asBoolean() : false;
                 } else {
-                    String reason = "Parameter '" + paramName + "' in schema for event '" + event.getEventName() + "' is not text or object.";
-                    logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                    return reason;
+                    return propertyTypeLabel + " '" + paramName + "' schema is not text or object.";
                 }
 
                 if (isRequired && receivedValue == null) {
-                    String reason = "Event '" + event.getEventName() + "' is missing required parameter: " + paramName + " (value is null)";
-                    logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                    return reason;
+                    return propertyTypeLabel + " '" + paramName + "' is required but value is null.";
                 }
 
                 if (receivedValue != null) {
                     boolean typeMatch = false;
                     switch (expectedType) {
-                        case "string":
-                            typeMatch = receivedValue instanceof String;
-                            break;
-                        case "integer":
-                            typeMatch = receivedValue instanceof Integer || receivedValue instanceof Long;
-                            break;
-                        case "float":
-                        case "double":
-                            typeMatch = receivedValue instanceof Float || receivedValue instanceof Double;
-                            break;
-                        case "boolean":
-                            typeMatch = receivedValue instanceof Boolean;
-                            break;
+                        case "string": typeMatch = receivedValue instanceof String; break;
+                        case "integer": typeMatch = receivedValue instanceof Integer || receivedValue instanceof Long; break;
+                        case "float": case "double": typeMatch = receivedValue instanceof Float || receivedValue instanceof Double; break;
+                        case "boolean": typeMatch = receivedValue instanceof Boolean; break;
                         // TODO: Add more type checks
                         default:
-                            String reason = "Unknown expected type '" + expectedType + "' for parameter '" + paramName + "' in schema for event '" + event.getEventName() + "'.";
-                            logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                            return reason;
+                            return "Unknown expected type '" + expectedType + "' for " + propertyTypeLabel + " '" + paramName + "'.";
                     }
 
                     if (!typeMatch) {
-                        String reason = "Event '" + event.getEventName() + "' parameter '" + paramName + "' has incorrect type. Expected: " + expectedType + ", Received: " + (receivedValue != null ? receivedValue.getClass().getSimpleName() : "null");
-                        logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                        return reason;
+                        return propertyTypeLabel + " '" + paramName + "' has incorrect type. Expected: " + expectedType + ", Received: " + (receivedValue != null ? receivedValue.getClass().getSimpleName() : "null");
                     }
                 }
             }
         }
 
 
+        // Validate that all required properties are present
         if (schemaNode.isObject()) {
-            Iterator<Map.Entry<String, JsonNode>> fields = schemaNode.fields();
+            Iterator<Map.Entry<String, JsonNode>> fields = schemaNode.fields(); // Use fields() instead of next()
             while (fields.hasNext()) {
                 Map.Entry<String, JsonNode> field = fields.next();
                 String paramName = field.getKey();
@@ -273,16 +349,30 @@ public class DataIngestionServiceImpl implements DataIngestionService {
                 }
 
                 if (isRequired) {
-                    if (receivedParameters == null || !receivedParameters.containsKey(paramName)) {
-                        String reason = "Event '" + event.getEventName() + "' is missing required parameter: " + paramName;
-                        logger.debug("Validation failed for event '{}': {}", event.getEventName(), reason);
-                        return reason;
+                    if (properties == null || !properties.containsKey(paramName)) {
+                        return propertyTypeLabel + " '" + paramName + "' is missing and required.";
                     }
                 }
             }
         }
 
-        logger.debug("Validation successful for event '{}'.", event.getEventName());
-        return null;
+        return null; // Valid
+    }
+
+    // Modify validateEvent to use the reusable method
+    private String validateEvent(GameEventDTO event) {
+        if (event == null) return "Received null event.";
+        if (event.getEventName() == null || event.getEventName().trim().isEmpty()) return "Received event with empty or null event name.";
+
+        Optional<EventSchema> schemaOptional = eventSchemaRepository.findByEventName(event.getEventName());
+
+        if (schemaOptional.isEmpty()) {
+            logger.debug("No schema found for event: {}. Allowing event.", event.getEventName());
+            return "No schema found for event."; // Valid
+        }
+
+        EventSchema schema = schemaOptional.get();
+        // Use the reusable validation method for event parameters
+        return validateProperties(event.getParameters(), schema.getParameterSchema(), "Event Parameter");
     }
 }
