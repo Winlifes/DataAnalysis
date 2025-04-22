@@ -36,15 +36,22 @@
     <el-main class="schema-manager-content" :style="{ marginLeft: 0 }">
       <div class="header">
         <h2>{{ selectedMenuItemTitle }}</h2>
-        <!-- Show "新建事件结构" button only on Meta Events page -->
-        <el-button v-if="currentMenuItem === 'data-management-meta-events'" type="primary" :icon="Plus" @click="openSchemaModal('add')">新建事件结构</el-button>
-        <!-- Show tab switcher on Realtime Data page -->
-        <div v-if="currentMenuItem === 'tracking-management-realtime'">
+        <!-- Show buttons based on selected menu item -->
+        <template v-if="currentMenuItem === 'data-management-meta-events'">
+          <el-button type="primary" :icon="Plus" @click="openSchemaModal('add')">新建事件结构</el-button>
+        </template>
+        <template v-else-if="currentMenuItem === 'tracking-management-realtime'">
           <el-radio-group v-model="realtimeSubView" @change="handleRealtimeSubViewChange">
             <el-radio-button label="ingested">实时入库</el-radio-button>
             <el-radio-button label="errored">错误数据</el-radio-button>
           </el-radio-group>
-        </div>
+        </template>
+        <template v-else-if="currentMenuItem === 'tracking-management-debug'">
+          <el-input v-model="debugDeviceIdFilter" placeholder="按设备ID过滤" style="width: 200px; margin-left: auto;" clearable @input="handleDebugFilterChange"></el-input>
+        </template>
+        <template v-else-if="currentMenuItem === 'data-management-user-properties'">
+          <el-button type="primary" @click="openUserPropertySchemaModal">配置用户属性</el-button>
+        </template>
       </div>
 
       <!-- Content based on selected menu item and sub-view -->
@@ -128,16 +135,65 @@
           </el-pagination>
         </div>
       </div>
+      <!-- Debug Mode Content -->
+      <div v-else-if="currentMenuItem === 'tracking-management-debug'">
+        <el-table :data="debugEvents" v-loading="loadingDebug" style="width: 100%">
+          <el-table-column prop="receivedTimestamp" label="接收时间" width="180">
+            <template #default="scope">
+              {{ formatTimestamp(scope.row.receivedTimestamp) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="eventName" label="事件名称"></el-table-column>
+          <el-table-column prop="userId" label="用户ID"></el-table-column>
+          <el-table-column prop="deviceId" label="设备ID"></el-table-column>
+          <el-table-column prop="isValid" label="事件有效" width="90">
+            <template #default="scope">
+              <el-tag :type="scope.row.valid ? 'success' : 'danger'">{{ scope.row.valid ? '是' : '否' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="validationError" label="验证错误原因"></el-table-column>
+          <el-table-column label="原始事件参数">
+            <template #default="scope">
+              <pre>{{ formatEventParameters(scope.row.rawParameters) }}</pre>
+            </template>
+          </el-table-column>
+          <el-table-column label="原始用户属性">
+            <template #default="scope">
+              <pre>{{ formatEventParameters(scope.row.rawUserProperties) }}</pre>
+            </template>
+          </el-table-column>
+        </el-table>
+        <!-- Pagination for Debug Data -->
+        <el-pagination
+          v-if="debugPagination.total > debugPagination.pageSize"
+          @current-change="handleDebugPageChange"
+          :current-page="debugPagination.currentPage"
+          :page-size="debugPagination.pageSize"
+          layout="total, prev, pager, next"
+          :total="debugPagination.total">
+        </el-pagination>
+      </div>
+      <!-- User Properties Schema Content -->
+      <div v-else-if="currentMenuItem === 'data-management-user-properties'">
+        <h3>当前用户属性定义</h3>
+        <div v-if="userPropertySchema">
+          <pre>{{ formatParameterSchema(userPropertySchema.propertySchema) }}</pre>
+        </div>
+        <div v-else>
+          <p>暂无用户属性定义。</p>
+        </div>
+        <!-- The "配置用户属性" button is in the header -->
+      </div>
+
       <div v-else>
         <!-- Placeholder for other content sections -->
         <p>这是 "{{ selectedMenuItemTitle }}" 的内容区域。</p>
-        <!-- TODO: 根据 currentMenuItem 的值使用 v-else-if 或动态组件来加载实际的内容组件 -->
       </div>
 
 
     </el-main>
 
-    <!-- Add/Edit Schema Dialog (remains the same) -->
+    <!-- Add/Edit Event Schema Dialog (remains the same) -->
     <el-dialog v-model="schemaModalVisible" :title="modalMode === 'add' ? '新建事件结构' : '编辑事件结构'" width="600px" :close-on-click-modal="false">
       <!-- ... dialog content ... -->
       <el-form ref="schemaFormRef" :model="schemaForm" :rules="schemaFormRules" label-width="100px">
@@ -170,21 +226,63 @@
       </template>
     </el-dialog>
 
+    <!-- Configure User Property Schema Dialog -->
+    <el-dialog v-model="userPropertySchemaModalVisible" title="配置用户属性结构" width="600px" :close-on-click-modal="false">
+      <el-form ref="userPropertySchemaFormRef" :model="userPropertySchemaForm" label-width="100px">
+        <el-form-item label="属性定义">
+          <div class="parameter-list">
+            <div v-for="(prop, index) in userPropertySchemaForm.properties" :key="index" class="parameter-item">
+              <el-input v-model="prop.name" placeholder="属性名称" style="width: 120px; margin-right: 10px;"></el-input>
+              <el-select v-model="prop.type" placeholder="类型" style="width: 100px; margin-right: 10px;">
+                <el-option label="string" value="string"></el-option>
+                <el-option label="integer" value="integer"></el-option>
+                <el-option label="float" value="float"></el-option>
+                <el-option label="boolean" value="boolean"></el-option>
+                <!-- Add other types as needed -->
+              </el-select>
+              <el-checkbox v-model="prop.required">必需</el-checkbox>
+              <el-button type="danger" :icon="Delete" circle size="small" @click="removeUserProperty(index)"></el-button>
+            </div>
+            <el-button :icon="Plus" @click="addUserProperty">添加属性</el-button>
+          </div>
+        </el-form-item>
+        <!-- TODO: Add validation rules for user properties if needed -->
+      </el-form>
+      <template #footer>
+             <span class="dialog-footer">
+                 <el-button @click="userPropertySchemaModalVisible = false">取消</el-button>
+                 <el-button type="primary" @click="submitUserPropertySchemaForm">确定</el-button>
+             </span>
+      </template>
+    </el-dialog>
+
   </el-container>
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed, shallowRef, onUnmounted, watch } from 'vue';
+import {ref, onMounted, reactive, computed, shallowRef, onUnmounted, watch} from 'vue';
 import TopNav from "@/components/TopNav.vue";
 import {
   ElMessage, ElMessageBox, ElTable, ElTableColumn, ElButton, ElPopconfirm,
   ElDialog, ElForm, ElFormItem, ElInput, ElSelect, ElCheckbox, ElLoading,
   ElContainer, ElAside, ElMain, ElScrollbar, ElMenu, ElSubMenu, ElMenuItem, ElIcon,
-  ElPagination, ElRadioGroup, ElRadioButton // Import Radio components
+  ElPagination, ElRadioGroup, ElRadioButton, ElTag // Import ElTag for 'isValid'
 } from 'element-plus';
-import { Plus, Delete, DArrowLeft, DArrowRight, Setting, Document, DataAnalysis, Monitor, Bell, Grid, List } from '@element-plus/icons-vue';
+import {
+  Plus,
+  Delete,
+  DArrowLeft,
+  DArrowRight,
+  Setting,
+  Document,
+  DataAnalysis,
+  Monitor,
+  Bell,
+  Grid,
+  List
+} from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
-import api from "@/api/index.js"; // Make sure dayjs is installed and imported
+import api from "@/api/index.js";
 
 
 // --- Sidebar State and Logic (remains the same) ---
@@ -198,12 +296,12 @@ const menuData = ref([
     title: '数据管理',
     icon: shallowRef(DataAnalysis),
     children: [
-      { index: 'data-management-meta-events', title: '元事件' },
-      { index: 'data-management-event-properties', title: '事件属性' },
-      { index: 'data-management-user-properties', title: '用户属性' },
-      { index: 'data-management-data-tables', title: '数据表' },
-      { index: 'data-management-metrics', title: '指标' },
-      { index: 'data-management-exchange-rates', title: '汇率换算' }
+      {index: 'data-management-meta-events', title: '元事件'},
+      {index: 'data-management-event-properties', title: '事件属性'},
+      {index: 'data-management-user-properties', title: '用户属性'},
+      {index: 'data-management-data-tables', title: '数据表'},
+      {index: 'data-management-metrics', title: '指标'},
+      {index: 'data-management-exchange-rates', title: '汇率换算'}
     ]
   },
   {
@@ -211,11 +309,11 @@ const menuData = ref([
     title: '埋点管理',
     icon: shallowRef(Setting),
     children: [
-      { index: 'tracking-management-plans', title: '埋点方案' },
-      { index: 'tracking-management-acceptance', title: '数据验收' },
-      { index: 'tracking-management-reporting', title: '上报管理' },
-      { index: 'tracking-management-realtime', title: '实时数据' }, // Realtime Data
-      { index: 'tracking-management-debug', title: 'Debug 模式' }
+      {index: 'tracking-management-plans', title: '埋点方案'},
+      {index: 'tracking-management-acceptance', title: '数据验收'},
+      {index: 'tracking-management-reporting', title: '上报管理'},
+      {index: 'tracking-management-realtime', title: '实时数据'},
+      {index: 'tracking-management-debug', title: 'Debug 模式'} // Debug Mode
     ]
   },
   {
@@ -223,8 +321,8 @@ const menuData = ref([
     title: '数据接入',
     icon: shallowRef(Monitor),
     children: [
-      { index: 'data-integration-guide', title: '接入指南' },
-      { index: 'data-integration-third-party', title: '三方集成' }
+      {index: 'data-integration-guide', title: '接入指南'},
+      {index: 'data-integration-third-party', title: '三方集成'}
     ]
   }
 ]);
@@ -245,25 +343,39 @@ const toggleSidebarCollapse = () => {
 const handleMenuSelect = (index) => {
   currentMenuItem.value = index;
   console.log('Selected menu item:', index);
-  // Stop realtime refresh when switching away from realtime view
+  // Stop all polling/refresh timers when switching views
   stopRealtimeRefresh();
+  stopDebugRefresh();
+
+
+  // Clear data from previous view
+  eventSchemas.value = [];
+  realtimeEventsIngested.value = [];
+  realtimeEventsErrored.value = [];
+  debugEvents.value = [];
+  userPropertySchema.value = null; // Clear user property schema display
+
 
   // Load content based on the selected index
   if (index === 'data-management-meta-events') {
     fetchEventSchemas();
   } else if (index === 'tracking-management-realtime') {
-    // Reset sub-view to default and fetch data for it
     realtimeSubView.value = 'ingested'; // Default to '实时入库'
-    resetRealtimePagination(); // Reset pagination for both views
-    fetchRealtimeDataForCurrentSubView(); // Fetch data for the default sub-view
-    startRealtimeRefresh(); // Start refresh timer
-  } else {
-    // Clear data and close modal for other items
-    eventSchemas.value = [];
-    realtimeEventsIngested.value = [];
-    realtimeEventsErrored.value = [];
-    schemaModalVisible.value = false;
+    resetRealtimePagination();
+    fetchRealtimeDataForCurrentSubView();
+    startRealtimeRefresh();
+
+  } else if (index === 'tracking-management-debug') {
+    debugDeviceIdFilter.value = ''; // Clear device ID filter
+    resetDebugPagination();
+    fetchDebugEvents();
+    startDebugRefresh();
+
+  } else if (index === 'data-management-user-properties') {
+    // Load user property schema for display
+    fetchUserPropertySchema();
   }
+  // TODO: Add else if for other menu items
 };
 
 
@@ -282,7 +394,7 @@ const schemaForm = reactive({
 });
 
 const schemaFormRules = {
-  eventName: [{ required: true, message: '请输入事件名称', trigger: 'blur' }]
+  eventName: [{required: true, message: '请输入事件名称', trigger: 'blur'}]
 };
 
 // --- Event Schema Data Methods (remains the same, added check for currentMenuItem) ---
@@ -326,7 +438,7 @@ const openSchemaModal = (mode, schema = null) => {
         schemaForm.parameters = Object.keys(params).map(key => {
           const paramDef = params[key];
           if (typeof paramDef === 'string') {
-            return { name: key, type: paramDef, required: false };
+            return {name: key, type: paramDef, required: false};
           } else if (typeof paramDef === 'object' && paramDef !== null) {
             return {
               name: key,
@@ -334,7 +446,7 @@ const openSchemaModal = (mode, schema = null) => {
               required: paramDef.required || false
             };
           }
-          return { name: key, type: '', required: false };
+          return {name: key, type: '', required: false};
         });
       } catch (e) {
         console.error('Failed to parse parameter schema:', e);
@@ -355,7 +467,7 @@ const resetSchemaForm = () => {
 };
 
 const addParameter = () => {
-  schemaForm.parameters.push({ name: '', type: '', required: false });
+  schemaForm.parameters.push({name: '', type: '', required: false});
 };
 
 const removeParameter = (index) => {
@@ -369,7 +481,7 @@ const submitSchemaForm = async () => {
       schemaForm.parameters.forEach(param => {
         if (param.name && param.type) {
           if (param.required) {
-            parameterSchemaJson[param.name] = { type: param.type, required: true };
+            parameterSchemaJson[param.name] = {type: param.type, required: true};
           } else {
             parameterSchemaJson[param.name] = param.type;
           }
@@ -428,7 +540,6 @@ const realtimeEventsIngested = ref([]);
 const realtimeEventsErrored = ref([]);
 const loadingRealtime = ref(false);
 
-// Separate pagination for each sub-view
 const realtimePaginationIngested = reactive({
   currentPage: 1,
   pageSize: 10,
@@ -441,7 +552,7 @@ const realtimePaginationErrored = reactive({
 });
 
 let realtimeRefreshTimer = null; // Timer instance
-const REALTIME_REFRESH_INTERVAL = 5000; // Refresh interval in milliseconds (e.g., 5 seconds)
+const REALTIME_REFRESH_INTERVAL = 5000; // Refresh interval in milliseconds (5 seconds)
 
 
 // Fetch data based on the currently selected realtime sub-view
@@ -462,12 +573,11 @@ const fetchRealtimeIngestedEvents = async () => {
 
   loadingRealtime.value = true;
   try {
-    // Backend page is 0-indexed, frontend is 1-indexed
     const page = realtimePaginationIngested.currentPage - 1;
     const size = realtimePaginationIngested.pageSize;
     const response = await api.get(`/api/data/realtime?page=${page}&size=${size}`);
-    realtimeEventsIngested.value = response.data.content; // Spring Data Page returns content in 'content' field
-    realtimePaginationIngested.total = response.data.totalElements; // Total number of elements
+    realtimeEventsIngested.value = response.data.content;
+    realtimePaginationIngested.total = response.data.totalElements;
     console.log("Fetched realtime ingested events:", realtimeEventsIngested.value);
   } catch (error) {
     console.error('Failed to fetch realtime ingested events:', error);
@@ -486,10 +596,9 @@ const fetchRealtimeErroredEvents = async () => {
 
   loadingRealtime.value = true;
   try {
-    // Backend page is 0-indexed, frontend is 1-indexed
     const page = realtimePaginationErrored.currentPage - 1;
     const size = realtimePaginationErrored.pageSize;
-    const response = await api.get(`/api/data/errored?page=${page}&size=${size}`); // New endpoint
+    const response = await api.get(`/api/data/errored?page=${page}&size=${size}`);
     realtimeEventsErrored.value = response.data.content;
     realtimePaginationErrored.total = response.data.totalElements;
     console.log("Fetched realtime errored events:", realtimeEventsErrored.value);
@@ -505,7 +614,6 @@ const fetchRealtimeErroredEvents = async () => {
 // Start the realtime refresh timer
 const startRealtimeRefresh = () => {
   stopRealtimeRefresh(); // Clear any existing timer
-  // Set a new interval timer to fetch data for the currently active sub-view
   realtimeRefreshTimer = setInterval(fetchRealtimeDataForCurrentSubView, REALTIME_REFRESH_INTERVAL);
   console.log("Realtime refresh started.");
 };
@@ -523,12 +631,13 @@ const stopRealtimeRefresh = () => {
 const handleRealtimeSubViewChange = (newSubView) => {
   realtimeSubView.value = newSubView;
   // Reset pagination for the newly selected sub-view and fetch data
+  // Pagination reset is handled in resetRealtimePagination, call fetch after reset
   if (newSubView === 'ingested') {
     realtimePaginationIngested.currentPage = 1;
   } else if (newSubView === 'errored') {
     realtimePaginationErrored.currentPage = 1;
   }
-  fetchRealtimeDataForCurrentSubView(); // Fetch data for the new sub-view
+  fetchRealtimeDataForCurrentSubView(); // Fetch data for the new sub-view immediately
   // The timer is already running and will pick up the new sub-view on the next tick
 };
 
@@ -544,26 +653,228 @@ const handleRealtimeErroredPageChange = (newPage) => {
   fetchRealtimeErroredEvents(); // Fetch data for the new page
 };
 
-// Reset pagination for both views
+// Reset pagination for both realtime views
 const resetRealtimePagination = () => {
   realtimePaginationIngested.currentPage = 1;
   realtimePaginationErrored.currentPage = 1;
   // Total will be updated by the fetch calls
 };
 
-// Format timestamp for display
+
+// --- Debug Mode State and Logic ---
+const debugEvents = ref([]);
+const loadingDebug = ref(false);
+const debugDeviceIdFilter = ref(''); // State for device ID filter input
+const debugPagination = reactive({
+  currentPage: 1,
+  pageSize: 10,
+  total: 0
+});
+let debugRefreshTimer = null; // Timer instance for debug data polling
+const DEBUG_REFRESH_INTERVAL = 3000; // Polling interval for debug data (e.g., 3 seconds)
+
+
+// Fetch debug events from backend
+const fetchDebugEvents = async () => {
+  if (currentMenuItem.value !== 'tracking-management-debug') {
+    console.log('Not on Debug Mode view, skipping fetch.');
+    return;
+  }
+
+  loadingDebug.value = true;
+  try {
+    const page = debugPagination.currentPage - 1;
+    const size = debugPagination.pageSize;
+    const deviceId = debugDeviceIdFilter.value.trim(); // Get filter value
+
+    const response = await api.get(`/api/data/debug`, {
+      params: {
+        page: page,
+        size: size,
+        deviceId: deviceId // Include deviceId as a query parameter
+      }
+    });
+    debugEvents.value = response.data.content;
+    debugPagination.total = response.data.totalElements;
+    console.log("Fetched debug events:", debugEvents.value);
+  } catch (error) {
+    console.error('Failed to fetch debug events:', error);
+    ElMessage.error('加载 Debug 数据失败');
+  } finally {
+    loadingDebug.value = false;
+  }
+};
+
+// Start the debug refresh (polling) timer
+const startDebugRefresh = () => {
+  stopDebugRefresh(); // Clear any existing timer
+  debugRefreshTimer = setInterval(fetchDebugEvents, DEBUG_REFRESH_INTERVAL);
+  console.log("Debug refresh (polling) started.");
+};
+
+// Stop the debug refresh (polling) timer
+const stopDebugRefresh = () => {
+  if (debugRefreshTimer) {
+    clearInterval(debugRefreshTimer);
+    debugRefreshTimer = null;
+    console.log("Debug refresh (polling) stopped.");
+  }
+};
+
+// Handle page change for Debug Data pagination
+const handleDebugPageChange = (newPage) => {
+  debugPagination.currentPage = newPage;
+  fetchDebugEvents(); // Fetch data for the new page
+};
+
+// Handle change in Device ID filter for Debug Data
+// Use a debounce if the list is very large and input is fast
+const handleDebugFilterChange = () => {
+  // When the filter changes, reset to the first page and fetch
+  debugPagination.currentPage = 1;
+  fetchDebugEvents();
+  // The polling timer will pick up the new filter value on the next tick
+};
+
+// Reset pagination for debug view
+const resetDebugPagination = () => {
+  debugPagination.currentPage = 1;
+  // Total will be updated by the fetch call
+};
+
+// --- User Property Schema State and Logic ---
+const userPropertySchema = ref(null); // Stores the fetched user property schema
+const userPropertySchemaModalVisible = ref(false); // Modal visibility
+const userPropertySchemaFormRef = ref(null); // Form ref
+const userPropertySchemaForm = reactive({
+  properties: [] // [{ name: '', type: '', required: false }]
+});
+// Note: User property schema doesn't have an eventName field in the form
+
+
+// Fetch the user property schema
+const fetchUserPropertySchema = async () => {
+  if (currentMenuItem.value !== 'data-management-user-properties') {
+    console.log('Not on User Properties page, skipping fetch.');
+    return;
+  }
+  try {
+    const response = await api.get('/api/schemas/user-properties');
+    userPropertySchema.value = response.data;
+    console.log("Fetched user property schema:", userPropertySchema.value);
+  } catch (error) {
+    // Handle 404 specifically, as it means no schema is defined yet
+    if (error.response && error.response.status === 404) {
+      userPropertySchema.value = null; // Set to null if schema not found
+      console.log("No user property schema defined.");
+    } else {
+      console.error('Failed to fetch user property schema:', error);
+      ElMessage.error('加载用户属性结构失败');
+    }
+  }
+};
+
+// Open the user property schema configuration modal
+const openUserPropertySchemaModal = () => {
+  resetUserPropertySchemaForm(); // Reset form before opening
+  // Populate the form with existing schema data if available
+  if (userPropertySchema.value && userPropertySchema.value.propertySchema) {
+    try {
+      const properties = JSON.parse(userPropertySchema.value.propertySchema);
+      userPropertySchemaForm.properties = Object.keys(properties).map(key => {
+        const propDef = properties[key];
+        if (typeof propDef === 'string') {
+          return { name: key, type: propDef, required: false };
+        } else if (typeof propDef === 'object' && propDef !== null) {
+          return {
+            name: key,
+            type: propDef.type || '',
+            required: propDef.required || false
+          };
+        }
+        return { name: key, type: '', required: false }; // Handle unexpected format
+      });
+    } catch (e) {
+      console.error('Failed to parse user property schema JSON for editing:', e);
+      ElMessage.error('解析用户属性结构进行编辑失败');
+      userPropertySchemaForm.properties = []; // Clear properties on parse error
+    }
+  }
+  userPropertySchemaModalVisible.value = true;
+};
+
+// Reset the user property schema form
+const resetUserPropertySchemaForm = () => {
+  userPropertySchemaForm.properties = [];
+  if (userPropertySchemaFormRef.value) {
+    // Note: resetFields might not work as expected for reactive properties
+    // Manually clear if needed or rely on reassignment above
+  }
+};
+
+// Add a new user property field to the form
+const addUserProperty = () => {
+  userPropertySchemaForm.properties.push({ name: '', type: '', required: false });
+};
+
+// Remove a user property field from the form
+const removeUserProperty = (index) => {
+  userPropertySchemaForm.properties.splice(index, 1);
+};
+
+// Submit the user property schema form
+const submitUserPropertySchemaForm = async () => {
+  // TODO: Add validation for user property names (e.g., unique, non-empty) and types
+  if (!userPropertySchemaFormRef.value) return;
+  // await userPropertySchemaFormRef.value.validate(async (valid) => { // Add validation if rules are defined
+  // if (valid) {
+  const propertySchemaJson = {};
+  userPropertySchemaForm.properties.forEach(prop => {
+    if (prop.name && prop.type) {
+      if (prop.required) {
+        propertySchemaJson[prop.name] = { type: prop.type, required: true };
+      } else {
+        propertySchemaJson[prop.name] = prop.type;
+      }
+    }
+  });
+
+  const schemaData = {
+    // User property schema doesn't have eventName, just the propertySchema JSON string
+    propertySchema: Object.keys(propertySchemaJson).length > 0 ? JSON.stringify(propertySchemaJson) : null
+  };
+
+  try {
+    // Use PUT for upserting the single user property schema
+    const response = await api.put('/api/schemas/user-properties', schemaData);
+    userPropertySchema.value = response.data; // Update displayed schema
+    ElMessage.success('用户属性结构保存成功');
+    userPropertySchemaModalVisible.value = false; // Close modal
+    console.log("User property schema saved:", userPropertySchema.value);
+  } catch (error) {
+    console.error('Failed to save user property schema:', error);
+    // Handle validation errors from backend if any (e.g., 400)
+    if (error.response && error.response.headers['x-error-reason']) {
+      ElMessage.error(`保存用户属性结构失败: ${error.response.headers['x-error-reason']}`);
+    } else {
+      ElMessage.error(`保存用户属性结构失败: ${error.message || '未知错误'}`);
+    }
+  }
+  // } else {
+  //    console.log('User property schema form validation failed');
+  // }
+  // }); // End validation block
+};
+
+// --- Utility Methods ---
 const formatTimestamp = (timestamp) => {
-  // Timestamps from backend are likely milliseconds since epoch
   if (!timestamp) return '';
+  // Backend timestamps are likely milliseconds since epoch
   return dayjs(timestamp).format('YYYY-MM-DD HH:mm:ss');
 };
 
-// Format event parameters for display
 const formatEventParameters = (parameters) => {
   if (!parameters) return '无参数';
-  // Parameters are stored as JSON string in the backend GameEvent model,
-  // but api might automatically parse it back into an object/map if content type is JSON.
-  // If it's still a string, parse it first.
   let paramsObject = parameters;
   if (typeof parameters === 'string') {
     try {
@@ -573,56 +884,82 @@ const formatEventParameters = (parameters) => {
       return '无效的参数 JSON';
     }
   }
-
-  return JSON.stringify(paramsObject, null, 2); // Pretty print the parameters JSON
+  return JSON.stringify(paramsObject, null, 2);
 };
 
 
 // --- Lifecycle Hooks ---
 onMounted(() => {
-  // When the component is mounted, check the default menu item
-  // and load the corresponding content
+  // On mount, load data for the default menu item
   if (currentMenuItem.value === 'data-management-meta-events') {
     fetchEventSchemas();
   } else if (currentMenuItem.value === 'tracking-management-realtime') {
-    realtimeSubView.value = 'ingested'; // Default to '实时入库'
+    realtimeSubView.value = 'ingested';
     resetRealtimePagination();
-    fetchRealtimeDataForCurrentSubView(); // Fetch initial data
-    startRealtimeRefresh(); // Start refresh timer
+    fetchRealtimeDataForCurrentSubView();
+    startRealtimeRefresh();
+  } else if (currentMenuItem.value === 'tracking-management-debug') {
+    debugDeviceIdFilter.value = '';
+    resetDebugPagination();
+    fetchDebugEvents();
+    startDebugRefresh();
+  } else if (currentMenuItem.value === 'data-management-user-properties') {
+    fetchUserPropertySchema();
   }
+  // TODO: Add initial fetch for other menu items
 });
 
-// Lifecycle hook to stop the timer when the component is unmounted
+// Lifecycle hook to stop timers when the component is unmounted
 onUnmounted(() => {
   stopRealtimeRefresh();
+  stopDebugRefresh();
 });
 
-// Watch for changes in currentMenuItem to stop/start timer and clear data as needed
+// Watch for changes in currentMenuItem to manage timers and data clearing
 watch(currentMenuItem, (newValue, oldValue) => {
-  // Stop realtime refresh when switching away from realtime view
+  // Stop timers and clear data when leaving a view
   if (oldValue === 'tracking-management-realtime') {
     stopRealtimeRefresh();
-    realtimeEventsIngested.value = []; // Clear data when leaving the view
+    realtimeEventsIngested.value = [];
     realtimeEventsErrored.value = [];
-    resetRealtimePagination(); // Reset pagination when leaving the view
+    resetRealtimePagination();
+  }
+  if (oldValue === 'tracking-management-debug') {
+    stopDebugRefresh();
+    debugEvents.value = [];
+    debugDeviceIdFilter.value = '';
+    resetDebugPagination();
+  }
+  if (oldValue === 'data-management-user-properties') {
+    userPropertySchema.value = null; // Clear user property schema display
   }
 
-  // Start realtime data fetching and refresh when switching to realtime view
-  if (newValue === 'tracking-management-realtime') {
-    realtimeSubView.value = 'ingested'; // Default to '实时入库'
-    resetRealtimePagination();
-    fetchRealtimeDataForCurrentSubView(); // Fetch initial data
-    startRealtimeRefresh(); // Start refresh timer
+  // Start timers and fetch data when entering a view (handled in handleMenuSelect)
+});
+
+// Watch for changes in debugDeviceIdFilter to trigger a data fetch
+watch(debugDeviceIdFilter, (newValue, oldValue) => {
+  // Delay fetch slightly to avoid excessive calls while typing
+  const delay = 300; // milliseconds
+  // Clear previous timeout if exists
+  if (debugDeviceIdFilter.value._timeoutId) {
+    clearTimeout(debugDeviceIdFilter.value._timeoutId);
   }
+  debugDeviceIdFilter.value._timeoutId = setTimeout(() => {
+    console.log("Debug device ID filter changed to:", newValue);
+    // Reset to first page and fetch data
+    debugPagination.currentPage = 1;
+    fetchDebugEvents();
+  }, delay);
 });
 </script>
 
 <style scoped>
-/* Overall layout for schema manager page */
+/* Overall layout (remains the same) */
 .schema-manager-layout {
-  height: calc(100vh - 80px); /* Adjust based on TopNav height */
+  height: calc(100vh - 80px);
   overflow: hidden;
-  display: flex; /* Use flexbox for layout */
+  display: flex;
 }
 
 /* Sidebar styles (remains the same) */
@@ -633,46 +970,44 @@ watch(currentMenuItem, (newValue, oldValue) => {
   flex-direction: column;
   height: 100%;
   box-sizing: border-box;
-  transition: width 0.3s ease; /* Width transition animation */
-  overflow: hidden; /* Hide overflow when collapsed */
-  flex-shrink: 0; /* Prevent shrinking */
+  transition: width 0.3s ease;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
 .schema-sidebar .menu-scrollbar {
   flex-grow: 1;
-  height: 0; /* Allow flex-grow to work */
+  height: 0;
 }
 
 .schema-menu:not(.el-menu--collapse) {
-  width: 200px; /* Full width when not collapsed */
+  width: 200px;
   padding: 0 10px;
 }
 
 .schema-menu {
-  border-right: none; /* Remove default border */
+  border-right: none;
 }
 
-/* Main content area styles */
+/* Main content area styles (remains the same) */
 .schema-manager-content {
   padding: 20px;
-  background-color: #f0f2f5; /* Background color */
-  overflow-y: auto; /* Enable vertical scrolling */
+  background-color: #f0f2f5;
+  overflow-y: auto;
   height: 100%;
   box-sizing: border-box;
-  flex-grow: 1; /* Take remaining space */
-  transition: margin-left 0.3s ease; /* Smooth transition for margin when collapsing */
+  flex-grow: 1;
+  transition: margin-left 0.3s ease;
 }
 
-/* Header styles (remains the same, adjusted for radio group) */
+/* Header styles (adjusted for potential multiple items on the right) */
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-  /* Allow flex items to wrap if needed */
-  flex-wrap: wrap;
-  /* Add some gap between items */
-  gap: 10px;
+  flex-wrap: wrap; /* Allow items to wrap */
+  gap: 15px; /* Spacing between header items */
 }
 
 .header h2 {
@@ -680,9 +1015,24 @@ watch(currentMenuItem, (newValue, oldValue) => {
   font-size: 20px;
   font-weight: 600;
   color: #303133;
-  /* Prevent title from shrinking much */
   flex-shrink: 0;
 }
+
+/* Adjustments for specific header items */
+.header .el-button {
+  flex-shrink: 0; /* Prevent buttons from shrinking */
+}
+
+.header .el-radio-group {
+  flex-shrink: 0; /* Prevent radio group from shrinking */
+}
+
+/* Ensure the filter input doesn't take too much space */
+.header .el-input {
+  flex-shrink: 0;
+  min-width: 150px; /* Give it a minimum width */
+}
+
 
 /* Parameter list styles (remains the same) */
 .parameter-list {
@@ -729,8 +1079,8 @@ pre {
   font-size: 0.9em;
   line-height: 1.4;
   color: #333;
-  white-space: pre-wrap; /* Allow wrapping for long parameter JSON */
-  word-wrap: break-word; /* Break long words */
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 /* Optional: style for table header/rows (remains the same) */
@@ -750,10 +1100,12 @@ pre {
   color: var(--el-text-color-secondary);
   line-height: 1;
 }
+
 .sidebar-footer:hover {
   color: var(--el-color-primary);
   background-color: var(--el-fill-color-light);
 }
+
 .sidebar-footer .el-icon {
   font-size: 16px;
   vertical-align: middle;
@@ -814,5 +1166,15 @@ pre {
 .schema-menu.el-menu--collapse span,
 .schema-menu.el-menu--collapse :deep(.el-sub-menu__icon-arrow) {
   display: none;
+}
+
+/* User Properties Schema Specific Styles */
+.user-property-schema-display pre {
+  margin-top: 10px;
+}
+
+/* Adjustments for header items gap if necessary */
+.header {
+  gap: 15px; /* Increase gap if needed to space out buttons/inputs */
 }
 </style>
