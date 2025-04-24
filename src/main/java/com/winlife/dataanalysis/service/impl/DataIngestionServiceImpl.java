@@ -666,18 +666,69 @@ public class DataIngestionServiceImpl implements DataIngestionService {
             String calculationAlias = calcAttribute.replace('.', '_');
 
             if (calcAttribute.startsWith("parameter.")) {
-                String paramName = calcAttribute.substring("parameter.".length());
+                String[] params = calcAttribute.substring("parameter.".length()).split("@");
+                String paramName = params[0];
+                String paramType = params.length > 1 ? params[1] : "distinctCount"; // Default to string if no type specified
                 // Assuming a default aggregation for parameters, e.g., COUNT(DISTINCT) or SUM for numeric.
                 // This still needs schema lookup to determine type and choose SUM/AVG vs COUNT DISTINCT.
                 // For now, using COUNT(DISTINCT value) as a generic example.
-                calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"')))";
+                // 去重数 distinctCount
+                // 总和 sum
+                // 均值 avg
+                // 最大值 max
+                // 最小值 min
+                if(paramType.equals("distinctCount")){
+                    calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"')))";
+                }
+                else if(paramType.equals("sum")){
+                    calculationSqlExpression = "SUM(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"'))";
+                }
+                else if(paramType.equals("avg")){
+                    calculationSqlExpression = "AVG(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"'))";
+                }
+                else if(paramType.equals("max")){
+                    calculationSqlExpression = "MAX(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"'))";
+                }
+                else if(paramType.equals("min")){
+                    calculationSqlExpression = "MIN(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"'))";
+                }
+                else {
+                    logger.warn("Unsupported parameter type: {}", paramType);
+                    calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"')))";
+                }
                 calculationAlias = "parameter_" + paramName; // Example alias
 
             } else if (calcAttribute.startsWith("userProperty.")) {
-                String propName = calcAttribute.substring("userProperty.".length());
+                String[] params = calcAttribute.substring("userProperty.".length()).split("@");
+                String paramName = params[0];
+                String paramType = params.length > 1 ? params[1] : "distinctCount";
+
                 // Similar logic for user properties
-                calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.user_properties, '$.\"" + propName + "\"')))";
-                calculationAlias = "userProperty_" + propName; // Example alias
+                // 去重数 distinctCount
+                // 总和 sum
+                // 均值 avg
+                // 最大值 max
+                // 最小值 min
+                if(paramType.equals("distinctCount")){
+                    calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.user_properties, '$.\"" + paramName + "\"')))";
+                }
+                else if(paramType.equals("sum")){
+                    calculationSqlExpression = "SUM(JSON_EXTRACT(ge.user_properties, '$.\"" + paramName + "\"'))";
+                }
+                else if(paramType.equals("avg")){
+                    calculationSqlExpression = "AVG(JSON_EXTRACT(ge.user_properties, '$.\"" + paramName + "\"'))";
+                }
+                else if(paramType.equals("max")){
+                    calculationSqlExpression = "MAX(JSON_EXTRACT(ge.user_properties, '$.\"" + paramName + "\"'))";
+                }
+                else if(paramType.equals("min")){
+                    calculationSqlExpression = "MIN(JSON_EXTRACT(ge.user_properties, '$.\"" + paramName + "\"'))";
+                }
+                else {
+                    logger.warn("Unsupported userProperty type: {}", paramType);
+                    calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.user_properties, '$.\"" + paramName + "\"')))";
+                }
+                calculationAlias = "userProperty_" + paramName; // Example alias
             } else if (calcAttribute.equals("deviceId")) {
                 calculationSqlExpression = "COUNT(DISTINCT ge.device_id)";
                 calculationAlias = "uniqueDeviceCount";
