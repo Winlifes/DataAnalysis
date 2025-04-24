@@ -3,13 +3,17 @@ package com.winlife.dataanalysis.controller;
 
 import com.winlife.dataanalysis.model.EventSchema;
 import com.winlife.dataanalysis.repository.EventSchemaRepository;
+import com.winlife.dataanalysis.service.DataIngestionService;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/schemas/events") // 事件结构管理接口路径
@@ -17,6 +21,9 @@ import java.util.Optional;
 public class EventSchemaController {
 
     private final EventSchemaRepository eventSchemaRepository;
+    private static final Logger logger = LoggerFactory.getLogger(DataCollectionController.class);
+
+    private final DataIngestionService dataIngestionService;
 
     /**
      * 获取所有事件结构
@@ -85,6 +92,8 @@ public class EventSchemaController {
 
         // 更新字段
         existingSchema.setEventName(updatedSchema.getEventName());
+        existingSchema.setDisplayName(updatedSchema.getDisplayName());
+        existingSchema.setRemark(updatedSchema.getRemark());
         existingSchema.setParameterSchema(updatedSchema.getParameterSchema());
         // TODO: 可以根据需要在这里添加对 parameterSchema JSON 格式的更详细验证
 
@@ -106,5 +115,29 @@ public class EventSchemaController {
         eventSchemaRepository.deleteById(id);
         // 返回 204 No Content
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/names")
+    public List<String> getAllEventName()
+    {
+        List<EventSchema> eventSchemas = eventSchemaRepository.findAll();
+        return eventSchemas.stream()
+                .map(EventSchema::getEventName)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get EventSchema by event name.
+     * Used by frontend Event Analysis.txt to get schema for selected event.
+     * @param eventName The name of the event.
+     * @return EventSchema if found, or 404 Not Found.
+     */
+    @GetMapping("/name/{eventName}") // New endpoint path
+    public ResponseEntity<EventSchema> getEventSchemaByName(@PathVariable String eventName) {
+        logger.debug("Received request to get EventSchema for event name: {}", eventName);
+        Optional<EventSchema> eventSchema = dataIngestionService.getEventSchemaByName(eventName);
+        return eventSchema
+                .map(ResponseEntity::ok) // If found, return 200 OK with body
+                .orElseGet(() -> ResponseEntity.notFound().build()); // If not found, return 404 Not Found
     }
 }

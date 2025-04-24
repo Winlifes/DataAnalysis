@@ -5,6 +5,7 @@ import Analysis from '@/views/Analysis.vue'
 import Users from '@/views/Users.vue'
 import Data from '@/views/Data.vue'
 import UserCenter from "@/views/UserCenter.vue";
+import UserDetail from "@/views/UserDetailView.vue";
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -14,7 +15,8 @@ const routes = [
   { path: '/users', component: Users },
   { path: '/data', component: Data },
   { path: '/userCenter', component: UserCenter},
-]
+  { path: '/UserDetailView/:userId', name: 'UserDetail', component: UserDetail}
+  ]
 
 const router = createRouter({
   history: createWebHistory(),

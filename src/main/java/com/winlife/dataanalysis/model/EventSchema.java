@@ -18,8 +18,13 @@ public class EventSchema {
     @Column(unique = true, nullable = false) // 事件名称唯一且非空
     private String eventName;
 
+    private String displayName;
+
+    private String remark;
+
     // 使用 JSON 类型存储参数的结构定义
     // 格式示例: {"param1": "string", "param2": "integer", "param3": {"type": "boolean", "required": true}}
     @Column(columnDefinition = "JSON")
     private String parameterSchema;
+
 }
