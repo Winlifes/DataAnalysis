@@ -11,4 +11,7 @@ public class LoginResponse {
     private String token;
     private String nickname;
     private Boolean isSuperAdmin;
+    private Boolean isExported;
+    private Boolean isEdit;
+    private Boolean isCheck;
 }

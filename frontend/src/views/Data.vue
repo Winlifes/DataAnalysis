@@ -1769,7 +1769,7 @@ pre {
   vertical-align: middle;
 }
 
-/* Adjust ElMenu styles to match Dashboard sidebar (reused) */
+/* Adjust ElMenu styles to match Dashboard.txt sidebar (reused) */
 .schema-menu .el-menu-item,
 .schema-menu :deep(.el-sub-menu__title) {
   height: 40px;

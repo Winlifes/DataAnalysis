@@ -696,7 +696,7 @@ public class DataIngestionServiceImpl implements DataIngestionService {
                     logger.warn("Unsupported parameter type: {}", paramType);
                     calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.parameters, '$.\"" + paramName + "\"')))";
                 }
-                calculationAlias = "parameter_" + paramName; // Example alias
+                calculationAlias = "parameter_" + paramName + "_" + paramType; // Example alias
 
             } else if (calcAttribute.startsWith("userProperty.")) {
                 String[] params = calcAttribute.substring("userProperty.".length()).split("@");
@@ -728,7 +728,7 @@ public class DataIngestionServiceImpl implements DataIngestionService {
                     logger.warn("Unsupported userProperty type: {}", paramType);
                     calculationSqlExpression = "COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(ge.user_properties, '$.\"" + paramName + "\"')))";
                 }
-                calculationAlias = "userProperty_" + paramName; // Example alias
+                calculationAlias = "userProperty_" + paramName + "_" + paramType; // Example alias
             } else if (calcAttribute.equals("deviceId")) {
                 calculationSqlExpression = "COUNT(DISTINCT ge.device_id)";
                 calculationAlias = "uniqueDeviceCount";

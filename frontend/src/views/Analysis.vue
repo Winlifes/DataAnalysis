@@ -49,7 +49,7 @@ echarts.use([
   CanvasRenderer
 ]);
 
-import { DataAnalysis, Calendar, Filter, Operation, Plus, Delete } from '@element-plus/icons-vue';
+import { DataAnalysis, Download, Star, Calendar, Filter, Operation, Plus, Delete } from '@element-plus/icons-vue';
 
 import api from "@/api/index.js";
 
@@ -80,6 +80,12 @@ const analysisForm = reactive({
 // Options for dropdowns
 // ** UPDATED: availableEvents will now store list of EventSchema objects **
 const availableEvents = ref([]); // List of all EventSchema objects from backend
+
+const availableDashboards = ref([]); // List of available dashboard folders { id: number, title: string }
+// ** NEW: State for Save to Dashboard.txt Dialog **
+const showSaveDialog = ref(false);
+const dashboardTitle = ref('');
+const selectedDashboardId = ref(null); // Assuming folders have numeric IDs
 
 const chartTypeOptions = ref([
   { label: '柱状图', value: 'bar' },
@@ -118,7 +124,7 @@ const attributeOptions = computed(() => {
           // Store type information if available in schema
           const paramDef = params[key];
           let type = typeof paramDef === 'string' ? paramDef : (paramDef && paramDef.type ? paramDef.type : 'unknown');
-          options.push({ label: `参数: ${key}`, value: `parameter.${key}`, type: type });
+          options.push({ label: `事件属性: ${paramDef.displayName}`, value: `parameter.${key}`, type: type });
         });
       }
     } catch (e) {
@@ -138,7 +144,7 @@ const attributeOptions = computed(() => {
 
           if (typeof propDef === 'object' && propDef !== null) {
             if (propDef.displayName) {
-              label = `用户属性: ${propDef.displayName} (${key})`;
+              label = `用户属性: ${propDef.displayName}`;
             }
             if (propDef.type) {
               type = propDef.type;
@@ -288,6 +294,24 @@ const calculationAttributeOptions = computed(() => {
   return options;
 });
 
+const activeCalculationAliases = computed(() => {
+  const aliases = [];
+  if (analysisForm.includeEventCount) aliases.push('eventCount');
+  if (analysisForm.includeUniqueUserCount || analysisForm.includeAverageCountPerUser) {
+    aliases.push('uniqueUserCount');
+  }
+  if (analysisForm.includeAverageCountPerUser) {
+    aliases.push('averageCountPerUser');
+  }
+
+  analysisForm.calculations.forEach(calc => {
+    if (calc.attribute && calc.aggregationType) {
+      const alias = `${calc.attribute.replace('.', '_')}_${calc.aggregationType}`;
+      aliases.push(alias);
+    }
+  });
+  return [...new Set(aliases)];
+});
 
 const groupingAttributeOptions = computed(() => {
   const timeGranularityOptions = [
@@ -307,6 +331,218 @@ const groupingAttributeOptions = computed(() => {
 
 
 // --- Methods ---
+
+// ** NEW: Fetch available dashboard folders (Placeholder) **
+const fetchAvailableFolders = async () => {
+  // This is a placeholder. You need a backend endpoint to fetch folders.
+  // Example: GET /api/dashboard-folders
+  try {
+      const response = await api.get('/api/menu/dashboard');
+      availableDashboards.value = response.data || [];
+  } catch (error) {
+      console.error('Failed to fetch dashboard folders:', error);
+      ElMessage.error('加载看板失败');
+      availableDashboards.value = [];
+  }
+
+  // Set a default folder if available
+  // if (availableDashboards.value.length > 0) {
+  //   selectedDashboardId.value = selectedDashboardId.value[0].id;
+  // }
+};
+
+// ** NEW: Method to open the save dialog **
+const openSaveDialog = () => {
+  // Basic validation before opening dialog
+  if (!analysisForm.selectedEvent || !analysisForm.groupingAttribute || (activeCalculationAliases.value.length === 0 && !analysisForm.includeEventCount && !analysisForm.includeUniqueUserCount && !analysisForm.includeAverageCountPerUser)) {
+    ElMessage.warning("请先完成分析配置并运行分析以查看结果，然后才能保存。");
+    return;
+  }
+  // You might also want to check if analysisResults is not null and not empty
+  if (!analysisResults.value || analysisResults.value.length === 0) {
+    ElMessage.warning("当前没有分析结果，无法保存到看板。请先运行分析。");
+    return;
+  }
+
+  // Pre-fill title if possible (e.g., based on event name)
+  if (!dashboardTitle.value && analysisForm.selectedEvent) {
+    const eventOption = availableEvents.value.find(e => e.eventName === analysisForm.selectedEvent);
+    dashboardTitle.value = eventOption ? `${eventOption.displayName || eventOption.eventName} 分析` : `${analysisForm.selectedEvent} 分析`;
+  }
+
+  showSaveDialog.value = true;
+};
+
+// ** NEW: Method to save the analysis configuration to dashboard **
+const saveAnalysisToDashboard = async () => {
+  if (!dashboardTitle.value) {
+    ElMessage.warning("请输入看板项的标题。");
+    return;
+  }
+  // Construct the configuration object to be saved
+  const analysisConfig = {
+    ...analysisForm, // Include all analysisForm state
+    selectedChartType: selectedChartType.value, // Include selected chart type
+    // You might want to include other relevant frontend state here
+  };
+
+  // Serialize the configuration object to a JSON string
+  let configJsonString = '';
+  try {
+    configJsonString = JSON.stringify(analysisConfig);
+  } catch (e) {
+    console.error("Failed to serialize analysis configuration to JSON:", e);
+    ElMessage.error("保存配置失败：无法序列化配置。");
+    return;
+  }
+
+  // Prepare the payload for the backend
+  const payload = {
+    dashboardId: selectedDashboardId.value, // Include selected folder ID
+    title: dashboardTitle.value,
+    config: JSON.stringify(buildAnalysisQuery()),
+  };
+
+  console.log("Saving analysis configuration to dashboard:", payload);
+
+  // Call the backend API to save the dashboard configuration
+  // Assuming backend endpoint is POST /api/dashboards
+  try {
+    // You might want to show a loading state here specifically for saving
+    const response = await api.post('/api/menu/dashboard/config', payload);
+    console.log("Dashboard.txt saved successfully:", response.data);
+    ElMessage.success("分析配置已保存到看板！");
+    showSaveDialog.value = false; // Close dialog on success
+    // Optionally, clear the dialog form or reset state
+    dashboardTitle.value = '';
+    // selectedFolderId.value = null; // Decide if you want to reset folder selection
+
+  } catch (error) {
+    console.error('Failed to save analysis configuration to dashboard:', error);
+    if (error.response && error.response.data && error.response.data.message) {
+      ElMessage.error(`保存到看板失败: ${error.response.data.message}`);
+    }
+    else {
+      ElMessage.error(`保存到看板失败: ${error.message || '未知错误'}`);
+    }
+  }
+};
+
+/**
+ * Handles the export button click. Exports chart image or table data.
+ */
+const handleExport = () => {
+  console.log("Export button clicked. Current type:", selectedChartType.value);
+  if (!analysisResults.value || analysisResults.value.length === 0) {
+    ElMessage.warning("没有分析结果可以导出。");
+    return;
+  }
+
+  const isExport = localStorage.getItem("isExport");
+  if(!isExport || isExport === "false")
+  {
+    ElMessage.warning("没有导出权限。");
+    return;
+  }
+
+  if (selectedChartType.value !== 'table') {
+    // Export Chart
+    if (myChart && chartContainer.value) {
+      try {
+        console.log("Attempting to export chart as PNG.");
+        const dataURL = myChart.getDataURL({
+          type: 'png',
+          pixelRatio: 2, // Increase resolution
+          backgroundColor: '#fff' // Set background color
+        });
+
+        // Create a temporary link element to trigger download
+        const link = document.createElement('a');
+        link.href = dataURL;
+        // Generate a filename based on event and type
+        const eventName = analysisForm.selectedEvent || 'analysis';
+        const chartTypeName = chartTypeOptions.value.find(opt => opt.value === selectedChartType.value)?.label || 'chart';
+        const filename = `${eventName}_${chartTypeName}_${Date.now()}.png`;
+        link.download = filename;
+
+        // Append link to body and click it
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        console.log("Chart export initiated.");
+        ElMessage.success("图表导出成功！");
+
+      } catch (e) {
+        console.error("Failed to export chart:", e);
+        ElMessage.error("导出图表失败。");
+      }
+    } else {
+      console.warn("Export button clicked for chart type, but myChart instance or container not found.");
+      ElMessage.warning("图表未完全加载，无法导出。");
+    }
+  } else {
+    // Export Table Data (e.g., as CSV)
+    console.log("Attempting to export table data as CSV.");
+    try {
+      if (!dynamicTableData.value || dynamicTableData.value.length === 0 || !dynamicTableColumns.value || dynamicTableColumns.value.length === 0) {
+        ElMessage.warning("没有表格数据可以导出。");
+        return;
+      }
+
+      // Build CSV header from dynamicTableColumns labels
+      const headers = dynamicTableColumns.value.map(col => col.label).join(',');
+
+      // Build CSV rows from dynamicTableData
+      const rows = dynamicTableData.value.map(row => {
+        return dynamicTableColumns.value.map(col => {
+          let cellValue = row[col.prop];
+          // Apply formatter if exists (e.g., for average or counts)
+          if (col.formatter && typeof col.formatter === 'function') {
+            cellValue = col.formatter(row, col, cellValue);
+          }
+          // Handle potential null/undefined values and escape commas/quotes
+          cellValue = cellValue == null ? '' : String(cellValue);
+          if (cellValue.includes(',') || cellValue.includes('"') || cellValue.includes('\n')) {
+            // Escape double quotes by doubling them, then wrap field in double quotes
+            cellValue = '"' + cellValue.replace(/"/g, '""') + '"';
+          }
+          return cellValue;
+        }).join(',');
+      }).join('\n');
+
+      const csvContent = headers + '\n' + rows;
+
+      // Create a Blob from the CSV content
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+
+      // Create a link element
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+
+      link.href = url;
+      // Generate a filename
+      const eventName = analysisForm.selectedEvent || 'analysis';
+      const filename = `${eventName}_table_data_${Date.now()}.csv`;
+      link.download = filename;
+
+      // Append link to body, click it, and clean up
+      document.body.appendChild(link);
+      link.click();
+
+      // Release the object URL
+      URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+
+      console.log("Table data export initiated.");
+      ElMessage.success("表格数据导出成功！");
+
+    } catch (e) {
+      console.error("Failed to export table data:", e);
+      ElMessage.error("导出表格数据失败。");
+    }
+  }
+};
 
 /**
  * Fetches the list of all EventSchema objects from the backend.
@@ -631,7 +867,7 @@ const renderChart = (results, chartType, query) => {
   // Add aliases for attribute aggregations from the form state
   analysisForm.calculations.forEach(calc => {
     if (calc.attribute && calc.aggregationType) {
-      const alias = `${calc.attribute.replace('.','_')}`;
+      const alias = `${calc.attribute.replace('.','_')}_${calc.aggregationType}`;
       calculationAliases.push(alias); // Use the generated alias
     }
   });
@@ -942,6 +1178,7 @@ onMounted(async () => {
   fetchAvailableEvents();
   // Fetch global user property schema on mount
   fetchGlobalUserPropertySchema();
+  fetchAvailableFolders(); // Fetch folders on mount
   // Initial chart rendering will be handled by the analysisResults watcher
   // when the initial data (empty or from saved state) is processed, or when
   // the first analysis results arrive. The watcher includes nextTick and container checks.
@@ -1109,6 +1346,24 @@ watch(analysisResults, async (newResults, oldResults) => {
       <template #header>
         <div class="analysis-card-header">
           <h2>事件分析</h2>
+          <div class="header-actions">
+          <el-button
+            type="primary"
+            :icon="Download"
+            size="small"
+            @click="handleExport"
+            :disabled="!analysisResults || analysisResults.length === 0">
+          导出
+          </el-button>
+          <el-button
+            type="success"
+            :icon="Star"
+            size="small"
+            @click="openSaveDialog"
+            :disabled="!analysisResults || analysisResults.length === 0">
+          保存至看板
+          </el-button>
+          </div>
         </div>
       </template>
 
@@ -1316,6 +1571,37 @@ watch(analysisResults, async (newResults, oldResults) => {
       </div>
     </el-card>
 
+    <el-dialog
+      v-model="showSaveDialog"
+      title="保存分析配置到看板"
+      width="400px"
+      @close="dashboardTitle = ''; selectedFolderId = null;"
+    >
+    <el-form :model="analysisForm" label-width="80px">
+      <el-form-item label="标题">
+        <el-input v-model="dashboardTitle" placeholder="请输入看板项标题"></el-input>
+      </el-form-item>
+      <el-form-item label="看板">
+        <el-select v-model="selectedDashboardId" placeholder="选择看板" style="width: 100%;">
+          <el-option
+            v-for="dashboard in availableDashboards"
+            :key="dashboard.id"
+            :label="dashboard.title"
+            :value="dashboard.id"
+          ></el-option>
+        </el-select>
+        <p v-if="availableDashboards.length === 0" style="color: #909399; font-size: 12px; margin-top: 5px;">暂无可用看板</p>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+            <span class="dialog-footer">
+                <el-button @click="showSaveDialog = false">取消</el-button>
+                <el-button type="primary" @click="saveAnalysisToDashboard" :disabled="!selectedDashboardId">
+                    保存
+                </el-button>
+            </span>
+    </template>
+    </el-dialog>
   </el-main>
 </template>
 
@@ -1341,6 +1627,11 @@ watch(analysisResults, async (newResults, oldResults) => {
   padding-bottom: 10px; /* Match card header padding */
   border-bottom: 1px solid #ebeef5; /* Match card header border */
   margin-bottom: 15px; /* Match card header margin */
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
 }
 
 .el-form-item {

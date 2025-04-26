@@ -60,10 +60,14 @@ const handleCommand = (command) => {
       ElMessage.success('退出成功')
       localStorage.removeItem('token')
       localStorage.removeItem('nickname')
+      localStorage.removeItem("isSuperAdmin");
+      localStorage.removeItem("isCheck");
+      localStorage.removeItem("isEdit");
+      localStorage.removeItem("isExport");
       window.location.href = '/login'
       break
     default:
-      ElMessage.warning(`点击了 ${command}`)
+      ElMessage.warning("功能暂未实现")
   }
 }
 </script>
