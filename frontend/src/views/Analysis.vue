@@ -1065,7 +1065,7 @@ const renderTable = (results, query) => {
   // Add aliases for attribute aggregations from the form state
   analysisForm.calculations.forEach(calc => {
     if (calc.attribute && calc.aggregationType) {
-      const alias = `${calc.attribute.replace('.', '_')}`;
+      const alias = `${calc.attribute.replace('.', '_')}_${calc.aggregationType}`;
       calculationAliases.push(alias); // Use the generated alias
     }
   });
@@ -1109,7 +1109,7 @@ const renderTable = (results, query) => {
     } else {
       // Look up in analysisForm.calculations to find the original attribute and aggregation type
       const matchingCalc = analysisForm.calculations.find(calc =>
-        `${calc.attribute.replace('.', '_')}` === calcAlias
+        `${calc.attribute.replace('.', '_')}_${calc.aggregationType}` === calcAlias
       );
       if (matchingCalc) {
         const attrOption = attributeOptions.value.find(opt => opt.value === matchingCalc.attribute);
