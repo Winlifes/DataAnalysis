@@ -9,4 +9,8 @@ import java.util.List;
 public interface DashboardRepository extends JpaRepository<Dashboard, Long> {
     List<Dashboard> findByFolderId(Long folderId);
     void deleteByFolderId(Long folderId); // 级联删除辅助（如果没开启数据库级联）
+
+    List<Dashboard> findByFolderIdIn(List<Long> collect);
+
+    Dashboard getDashboardById(Long id);
 }

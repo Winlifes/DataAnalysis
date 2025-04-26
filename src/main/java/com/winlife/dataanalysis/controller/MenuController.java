@@ -1,6 +1,8 @@
 package com.winlife.dataanalysis.controller;
 
+import com.winlife.dataanalysis.dto.ConfigDTO;
 import com.winlife.dataanalysis.model.Dashboard;
+import com.winlife.dataanalysis.model.DashboardConfig;
 import com.winlife.dataanalysis.model.Folder;
 import com.winlife.dataanalysis.model.User;
 import com.winlife.dataanalysis.repository.UserRepository;
@@ -63,5 +65,41 @@ public class MenuController {
     @PutMapping("/dashboard/move")
     public void moveDashboard(@RequestBody Map<String, String> req) {
         menuService.moveDashboard(Long.parseLong(req.get("id")), Long.parseLong(req.get("targetFolderId")));
+    }
+
+    @GetMapping("/dashboard")
+    public List<Dashboard> getDashboardsByUserId() {
+        String username = JwtUtil.getUsername();
+        User user = userRepository.findByUsername(username).orElseThrow();
+        return menuService.getDashboardsByUserId(user.getId());
+    }
+
+    @GetMapping("/dashboard/{id}")
+    public Dashboard getDashboardById(@PathVariable Long id) {
+        return menuService.getDashboardById(id);
+    }
+
+    @PostMapping("/dashboard/config")
+    public void createDashboardConfig(@RequestBody ConfigDTO req) {
+        Long dashboardId = req.dashboardId;
+        menuService.createDashboardConfig(dashboardId, req.getTitle(), req.config);
+    }
+
+    @GetMapping("/dashboard/config/{id}")
+    public List<DashboardConfig> getDashboardConfigByDashboardId(@PathVariable Long id)
+    {
+        return menuService.getDashboardConfigByDashboardId(id);
+    }
+
+    @DeleteMapping("/dashboard/config/{id}")
+    public void deleteDashboardConfig(@PathVariable Long id)
+    {
+        menuService.deleteDashboardConfig(id);
+    }
+
+    @PutMapping("/dashboard/config")
+    public void setDashboardConfig(@RequestBody Map<String, String> req)
+    {
+        menuService.setDashboardConfig(Long.parseLong(req.get("id")), req.get("chartType"), req.get("size"));
     }
 }

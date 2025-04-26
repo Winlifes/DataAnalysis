@@ -69,6 +69,8 @@ const eventStatistics = ref([]);
 const chartContainer = ref(null);
 let myChart = null;
 
+const userPropertySchema = ref(null);
+const availableEvents = ref([]); // List of all EventSchema objects from backend
 
 // Event Sequence (right panel - list)
 const eventSequence = ref([]);
@@ -101,9 +103,8 @@ const formattedUserProperties = computed(() => {
             value = '[Complex Object]';
           }
         }
-        const label = key;
-
-        return { label: label, value: value };
+        const selectedProp = userPropertyOptions.value.find(opt => opt.value === key);
+        return { label: selectedProp ? selectedProp.label : key, value: value };
       });
     }
     return [];
@@ -113,7 +114,62 @@ const formattedUserProperties = computed(() => {
   }
 });
 
+const userPropertyOptions = computed(() => {
+  if (!userPropertySchema.value || !userPropertySchema.value.propertySchema) {
+    return [];
+  }
+  try {
+    const schema = JSON.parse(userPropertySchema.value.propertySchema);
+    if (typeof schema === 'object' && schema !== null) {
+      return Object.keys(schema).map(key => {
+        const propDef = schema[key];
+        let displayName = key; // Default to key if displayName is not found
+
+        if (typeof propDef === 'object' && propDef !== null && propDef.displayName) {
+          displayName = propDef.displayName;
+        }
+        // Return an object with 'label' for display and 'value' for the actual key
+        return { label: displayName, value: key };
+      }).sort((a, b) => a.label.localeCompare(b.label)); // Optional: sort alphabetically by label
+    }
+    return [];
+  } catch (e) {
+    console.error('Failed to parse user property schema JSON for options:', e);
+    return [];
+  }
+});
+
+
 // --- Methods ---
+const fetchUserPropertySchema = async () => {
+  userPropertySchema.value = null;
+  try {
+    const response = await api.get('/api/schemas/user-properties');
+    userPropertySchema.value = response.data;
+    console.log("Fetched user property schema:", userPropertySchema.value);
+  } catch (error) {
+    console.error('Failed to fetch user property schema:', error);
+    ElMessage.error('加载用户属性结构失败，用户属性查找可能不可用');
+    userPropertySchema.value = null;
+  } finally {
+
+  }
+};
+
+const fetchAvailableEvents = async () => {
+  availableEvents.value = []; // Clear previous data
+  try {
+    // Assuming backend endpoint for all event schemas is GET /api/schemas/events
+    const response = await api.get('/api/schemas/events'); // Use the provided endpoint
+    availableEvents.value = response.data || [];
+    console.log("Fetched available EventSchemas:", availableEvents.value);
+  } catch (error) {
+    console.error('Failed to fetch available events:', error);
+    ElMessage.error('加载事件列表失败');
+    availableEvents.value = [];
+  } finally {
+  }
+};
 
 const fetchInitialData = async () => {
   if (!userId.value) {
@@ -281,6 +337,11 @@ const loadMoreEvents = () => {
   }
 };
 
+const displayNameByEvent = (eventName) => {
+  const event = availableEvents.value.find(e => e.eventName === eventName);
+  return event ? event.displayName : eventName;
+}
+
 const formatTimestamp = (timestamp) => {
   if (!timestamp) return '-';
   return new Date(timestamp).toLocaleString();
@@ -310,9 +371,8 @@ const parseJsonPropertiesForDisplay = (jsonString) => {
             value = '[Complex Object]';
           }
         }
-        const label = key;
-
-        return { label: label, value: value };
+        const selectedProp = userPropertyOptions.value.find(opt => opt.value === key);
+        return { label: selectedProp ? selectedProp.label : key, value: value };
       });
     }
     console.warn("Expected JSON object for properties, but received:", properties);
@@ -346,7 +406,7 @@ const updateChart = (statsData) => {
     return;
   }
 
-  const eventNames = statsData.map(item => item.eventName);
+  const eventNames = statsData.map(item => displayNameByEvent(item.eventName));
   const eventCounts = statsData.map(item => item.count);
 
   const options = {
@@ -413,6 +473,8 @@ const resizeChart = () => {
 
 // --- Lifecycle Hooks ---
 onMounted(async () => {
+  fetchUserPropertySchema(); // Fetch schema on mount
+  fetchAvailableEvents();
   if (userId.value) {
     await nextTick();
     initChart([]);
@@ -481,7 +543,7 @@ watch(statsDateRange, (newRange, oldRange) => {
           <el-card class="box-card statistics-card">
             <template #header>
               <div class="card-header">
-                <span>用户行为总量统计 (柱状图)</span>
+                <span>用户行为总量统计</span>
               </div>
             </template>
             <div class="statistics-controls">
@@ -524,13 +586,13 @@ watch(statsDateRange, (newRange, oldRange) => {
                 <template #default="scope">
                   <div @click="toggleEventDetails(scope.row.id)" class="event-sequence-item">
                     <span class="event-timestamp">{{ formatTimestamp(scope.row.timestamp) }}</span>
-                    <span class="event-name">{{ scope.row.eventName }}</span>
+                    <span class="event-name">{{ displayNameByEvent(scope.row.eventName) }}</span>
                     <el-icon class="expand-icon" :class="{'is-expanded': scope.row.id === expandedEventId}">
                       <component :is="scope.row.id === expandedEventId ? ArrowDown : ArrowRight" />
                     </el-icon>
                   </div>
                   <div v-if="scope.row.id === expandedEventId" class="event-details-expanded">
-                    <p><strong>事件名称:</strong> {{ scope.row.eventName }}</p>
+                    <p><strong>事件名称:</strong> {{ displayNameByEvent(scope.row.eventName) }}</p>
                     <p><strong>用户ID:</strong> {{ scope.row.userId }}</p>
                     <p><strong>设备ID:</strong> {{ scope.row.deviceId }}</p>
                     <p><strong>时间戳:</strong> {{ formatTimestamp(scope.row.timestamp) }}</p>

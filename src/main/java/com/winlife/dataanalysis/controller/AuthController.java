@@ -45,19 +45,25 @@ public class AuthController {
             String token = jwtUtil.generateToken(userDetails);
             Optional<User> optionalUser = userService.findByUsername(request.getUsername());
             String nickname;
-            boolean isSuperAdmin;
+            boolean isSuperAdmin, isCheck, isEdit, isExport;
             if (optionalUser.isPresent()) {
                 nickname = optionalUser.get().getNickname();
                 isSuperAdmin = optionalUser.get().isAuthAdmin();
+                isCheck = optionalUser.get().isAuthCheck();
+                isEdit = optionalUser.get().isAuthEdit();
+                isExport = optionalUser.get().isAuthExport();
             }
             else {
                 nickname = "未设置";
                 isSuperAdmin = false;
+                isCheck = false;
+                isEdit = false;
+                isExport = false;
             }
-            return ResponseEntity.ok(new LoginResponse("success", "登录成功", token, nickname, isSuperAdmin));
+            return ResponseEntity.ok(new LoginResponse("success", "登录成功", token, nickname, isSuperAdmin, isExport, isEdit, isCheck));
         } catch (AuthenticationException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new LoginResponse("fail", "用户名或密码错误", null, null, false));
+                    .body(new LoginResponse("fail", "用户名或密码错误", null, null, false, false, false, false));
         }
     }
 

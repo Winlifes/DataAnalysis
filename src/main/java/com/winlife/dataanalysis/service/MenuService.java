@@ -1,29 +1,29 @@
 package com.winlife.dataanalysis.service;
 
 import com.winlife.dataanalysis.model.Dashboard;
+import com.winlife.dataanalysis.model.DashboardConfig;
 import com.winlife.dataanalysis.model.Folder;
+import com.winlife.dataanalysis.repository.DashboardConfigRepository;
 import com.winlife.dataanalysis.repository.DashboardRepository;
 import com.winlife.dataanalysis.repository.FolderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class MenuService {
 
-    private final FolderRepository folderRepo;
-    private final DashboardRepository dashboardRepo;
+    private final FolderRepository folderRepository;
+    private final DashboardRepository dashboardRepository;
+    private final DashboardConfigRepository dashboardConfigRepository;
 
     public List<Map<String, Object>> getMenuTree(Long userId) {
-        List<Folder> folders = folderRepo.findByUserId(userId);
-        List<Folder> projectFolders = folderRepo.findByIcon("section-project");
+        List<Folder> folders = folderRepository.findByUserId(userId);
+        List<Folder> projectFolders = folderRepository.findByIcon("section-project");
         for (Folder projectFolder : projectFolders) {
             if (!folders.contains(projectFolder)) {
                 folders.add(projectFolder);
@@ -32,7 +32,7 @@ public class MenuService {
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (Folder folder : folders) {
-            List<Dashboard> dashboards = dashboardRepo.findByFolderId(folder.getId());
+            List<Dashboard> dashboards = dashboardRepository.findByFolderId(folder.getId());
 
             Map<String, Object> folderMap = new HashMap<>();
             folderMap.put("id", folder.getId().toString());
@@ -53,37 +53,73 @@ public class MenuService {
 
     public Folder createFolder(Long userId, String title, String icon) {
         Folder folder = new Folder(null, userId, title, icon, LocalDateTime.now());
-        return folderRepo.save(folder);
+        return folderRepository.save(folder);
     }
 
     public Dashboard createDashboard(Long folderId, String title) {
-        Dashboard dashboard = new Dashboard(null, folderId, title, LocalDateTime.now());
-        return dashboardRepo.save(dashboard);
+        Dashboard dashboard = new Dashboard(null, folderId, title, LocalDateTime.now(), LocalDateTime.now());
+        return dashboardRepository.save(dashboard);
     }
 
     public void renameFolder(Long id, String newTitle) {
-        Folder folder = folderRepo.findById(id).orElseThrow();
+        Folder folder = folderRepository.findById(id).orElseThrow();
         folder.setTitle(newTitle);
-        folderRepo.save(folder);
+        folderRepository.save(folder);
     }
 
     public void renameDashboard(Long id, String newTitle) {
-        Dashboard dashboard = dashboardRepo.findById(id).orElseThrow();
+        Dashboard dashboard = dashboardRepository.findById(id).orElseThrow();
         dashboard.setTitle(newTitle);
-        dashboardRepo.save(dashboard);
+        dashboardRepository.save(dashboard);
     }
 
     public void deleteFolder(Long id) {
-        folderRepo.deleteById(id);
+        folderRepository.deleteById(id);
     }
 
     public void deleteDashboard(Long id) {
-        dashboardRepo.deleteById(id);
+        dashboardRepository.deleteById(id);
     }
 
     public void moveDashboard(Long id, Long targetFolderId) {
-        Dashboard dashboard = dashboardRepo.findById(id).orElseThrow();
+        Dashboard dashboard = dashboardRepository.findById(id).orElseThrow();
         dashboard.setFolderId(targetFolderId);
-        dashboardRepo.save(dashboard);
+        dashboardRepository.save(dashboard);
+    }
+
+    public Dashboard getDashboardById(Long id) {
+        return dashboardRepository.findById(id).orElseThrow();
+    }
+
+    public List<Dashboard> getDashboardsByUserId(Long userId) {
+        List<Folder> folders = new ArrayList<>(folderRepository.findByUserId(userId));
+        List<Folder> projectFolders = folderRepository.findByIcon("section-project");
+        for (Folder projectFolder : projectFolders) {
+            if (!folders.contains(projectFolder)) {
+                folders.add(projectFolder);
+            }
+        }
+        return dashboardRepository.findByFolderIdIn(folders.stream().map(Folder::getId).collect(Collectors.toList()));
+    }
+
+    public void createDashboardConfig(Long id, String title, String config) {
+        DashboardConfig dashboardConfig = new DashboardConfig(null, title, "small", "bar", id, config, LocalDateTime.now(), LocalDateTime.now());
+        dashboardConfigRepository.save(dashboardConfig);
+    }
+
+    public List<DashboardConfig> getDashboardConfigByDashboardId(Long id)
+    {
+        return dashboardConfigRepository.getDashboardConfigsByDashboardId(id);
+    }
+
+    public void deleteDashboardConfig(Long id) {
+        dashboardConfigRepository.deleteById(id);
+    }
+
+    public void setDashboardConfig(Long id, String chartType, String size) {
+        DashboardConfig dashboardConfig = dashboardConfigRepository.findById(id).orElseThrow();
+        dashboardConfig.setChartType(chartType);
+        dashboardConfig.setSize(size);
+        dashboardConfigRepository.save(dashboardConfig);
     }
 }

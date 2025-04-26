@@ -9,7 +9,7 @@
           <el-input
             v-model="username"
             placeholder="请输入用户名"
-            :prefix-icon="User"
+            :prefix-icon="icons.User"
             size="large"
           />
         </el-form-item>
@@ -19,7 +19,7 @@
             v-model="password"
             type="password"
             placeholder="请输入密码"
-            :prefix-icon="Lock"
+            :prefix-icon="icons.Lock"
             size="large"
           />
         </el-form-item>
@@ -48,15 +48,18 @@
 import { User, Lock } from "@element-plus/icons-vue";
 import {ElMessage} from "element-plus";
 import api from "@/api/index.js";
-import {onMounted} from "vue";
+import {icons} from "@element-plus/icons-vue/global";
 
-onMounted(() => {
-  localStorage.removeItem("token");
-  localStorage.removeItem("nickname");
-  localStorage.removeItem("isSuperAdmin");
-});
 
 export default {
+  computed: {
+    icons() {
+      return icons
+    },
+    User() {
+      return User
+    }
+  },
   components: {
     User,
     Lock,
@@ -88,7 +91,9 @@ export default {
           localStorage.setItem("token", result.token);
           localStorage.setItem("nickname", result.nickname);
           localStorage.setItem("isSuperAdmin", result.isSuperAdmin);
-
+          localStorage.setItem("isCheck", result.isCheck);
+          localStorage.setItem("isEdit", result.isEdit);
+          localStorage.setItem("isExport", result.isExported);
           this.$router.push("/dashboard");
         } else {
           ElMessage.error(result.message || "用户名或密码错误");
@@ -100,6 +105,14 @@ export default {
       }
     }
 
+  },
+  mounted() {
+    localStorage.removeItem("token");
+    localStorage.removeItem("nickname");
+    localStorage.removeItem("isSuperAdmin");
+    localStorage.removeItem("isCheck");
+    localStorage.removeItem("isEdit");
+    localStorage.removeItem("isExport");
   },
 };
 </script>
